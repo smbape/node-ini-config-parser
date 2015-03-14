@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "name": "sm-ini-config-parser",
+  "version": "0.0.1",
+  "main": "sm-ini-config-parser.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "ini": "*",
+    "lodash": "*"
+  }
+}
