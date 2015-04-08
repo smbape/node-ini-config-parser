@@ -6,7 +6,7 @@ function parseFlat(config, coerce) {
     var i, key, next, properties, property, value, _i, _len;
     for (key in config) {
         if ('function' === typeof coerce) {
-            value = coerce(config[key]);
+            config[key] = value = coerce(config[key]);
         } else {
             value = config[key];
         }
@@ -29,7 +29,7 @@ function parseFlat(config, coerce) {
         }
         next = null;
     }
-};
+}
 
 function parse(filePath, coerce) {
     var config;
@@ -56,8 +56,55 @@ function parse(filePath, coerce) {
         parseFlat(config[section], coerce);
     }
     return config;
-};
+}
 
-module.exports = {
-    parse: parse
-};
+function isObject(value) {
+    // Avoid a V8 JIT bug in Chrome 19-20.
+    // See https://code.google.com/p/v8/issues/detail?id=2291 for more details.
+    var type = typeof value;
+    return type == 'function' || (value && type == 'object') || false;
+}
+
+function parser(registry) {
+    if (!isObject(registry) || 'function' !== typeof registry.has || 'function' !== typeof registry.get) {
+        registry = {
+            has: function() {
+                return false;
+            }
+        };
+    }
+
+    var coerce = function(value) {
+        if ('string' !== typeof value || value.length === 0) {
+            return value;
+        }
+        if (value === 'true') {
+            return true;
+        }
+        if (value === 'false') {
+            return false;
+        }
+        if (!isNaN(value)) {
+            return parseFloat(value);
+        }
+        return value.replace(/\$([\w\$]+)/g, function(match, variable, index, str) {
+            if (variable === '$') {
+                return variable;
+            }
+            if (registry.has(variable)) {
+                return registry.get(variable);
+            }
+            if (process.env.hasOwnProperty(variable)) {
+                return process.env[variable];
+            }
+            return match;
+        });
+    };
+
+    return function(filePath) {
+        return parse(filePath, coerce);
+    };
+}
+
+parser.parse = parse;
+module.exports = parser;
