@@ -3,22 +3,25 @@ var fs = require('fs'),
     _ = require('lodash');
 
 function parseFlat(config, coerce) {
-    var i, key, next, properties, property, value, _i, _len;
+    var i, key, next, properties, property, value, _len, parsedConfig = {};
     for (key in config) {
         if ('function' === typeof coerce) {
-            config[key] = value = coerce(config[key]);
+            value = coerce(config[key]);
         } else {
             value = config[key];
         }
+
         properties = key.split('.');
-        if (properties.length < 2) {
+        _len = properties.length
+        if (_len < 2) {
+            parsedConfig[key] = value;
             continue;
         }
-        next = config;
-        delete config[key];
-        for (i = _i = 0, _len = properties.length; _i < _len; i = ++_i) {
+
+        next = parsedConfig;
+        for (i = 0; i < _len; i++) {
             property = properties[i];
-            if (i === properties.length - 1) {
+            if (i === _len - 1) {
                 next[property] = value;
                 break;
             }
@@ -27,35 +30,38 @@ function parseFlat(config, coerce) {
             }
             next = next[property];
         }
-        next = null;
     }
+
+    return parsedConfig;
 }
 
 function parse(filePath, coerce) {
-    var config;
-    var child, config, index, parent, section, sections, _i, _ref;
-    config = ini.parse(fs.readFileSync(filePath, 'utf-8'));
-    for (section in config) {
+    var child, configs, index, parent, section, sections, _len;
+    configs = ini.parse(fs.readFileSync(filePath, 'utf-8'));
+
+    for (section in configs) {
         if (!/\s*:\s*/.test(section)) {
             continue;
         }
         sections = section.split(/\s*:\s*/);
         child = sections[0];
-        config[child] = {};
-        for (index = _i = 1, _ref = sections.length; _i < _ref; index = _i += 1) {
+        configs[child] = {};
+        for (index = 1, _len = sections.length; index < _len; index++) {
             parent = sections[index];
-            if (!config.hasOwnProperty(parent)) {
+            if (!configs.hasOwnProperty(parent)) {
                 continue;
             }
-            _.extend(config[child], config[parent]);
+            _.extend(configs[child], configs[parent]);
         }
-        _.extend(config[child], config[section]);
-        delete config[section];
+        _.extend(configs[child], configs[section]);
+        delete configs[section];
     }
-    for (section in config) {
-        parseFlat(config[section], coerce);
+
+    for (section in configs) {
+        configs[section] = parseFlat(configs[section], coerce);
     }
-    return config;
+
+    return configs;
 }
 
 function isObject(value) {
