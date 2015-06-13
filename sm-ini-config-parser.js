@@ -93,7 +93,7 @@ function parser(registry) {
         if (!isNaN(value)) {
             return parseFloat(value);
         }
-        return value.replace(/\$([\w\$]+)/g, function(match, variable, index, str) {
+        value = value.replace(/\$([\w\$]+)/g, function(match, variable, index, str) {
             if (variable === '$') {
                 return variable;
             }
@@ -103,8 +103,10 @@ function parser(registry) {
             if (process.env.hasOwnProperty(variable)) {
                 return process.env[variable];
             }
-            return match;
+            return '';
         });
+
+        return value.length === 0 ? null : value;
     };
 
     return function(filePath) {
