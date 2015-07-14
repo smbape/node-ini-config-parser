@@ -8,7 +8,6 @@
   },
   "license": "MIT",
   "dependencies": {
-    "ini": "*",
-    "lodash": "*"
+    "ini": "^1.3.4"
   }
 }

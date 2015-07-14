@@ -1,6 +1,15 @@
 var fs = require('fs'),
-    ini = require('ini'),
-    _ = require('lodash');
+    ini = require('ini');
+
+function extend(dst, src) {
+    if (null === dst || 'object' !== typeof dst || null === src || 'object' !== typeof src) {
+        return dst;
+    }
+
+    for (var key in src) {
+        dst[key] = src[key];
+    }
+}
 
 function parseFlat(config, coerce) {
     var i, key, next, properties, property, value, _len, parsedConfig = {};
@@ -51,9 +60,9 @@ function parse(filePath, coerce) {
             if (!configs.hasOwnProperty(parent)) {
                 continue;
             }
-            _.extend(configs[child], configs[parent]);
+            extend(configs[child], configs[parent]);
         }
-        _.extend(configs[child], configs[section]);
+        extend(configs[child], configs[section]);
         delete configs[section];
     }
 
