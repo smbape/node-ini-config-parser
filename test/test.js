@@ -93,10 +93,6 @@ function testCoerce(assert) {
                 }
             }
         };
-    // console.log(console.log(util.inspect(config, {
-    //     showHidden: true,
-    //     depth: null
-    // })));
     assert.deepEqual(config, expect);
     assert.done();
 }
