@@ -1,7 +1,7 @@
-sm-init-config-parser
+ini-config-parser
 =======
 
-Experimental ini config parser
+Parse ini file with nested config overriding made easier (experimental)
 
 config.ini
 ```ini
