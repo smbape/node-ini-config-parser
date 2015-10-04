@@ -1,11 +1,27 @@
 {
   "name": "ini-config-parser",
   "version": "0.1.0",
+  "description": "Parse ini file with nested config overriding made easierParse ini file with nested config overriding made easier",
   "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
   "scripts": {
     "test": "node ./test/test.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/smbape/node-ini-config-parser"
+  },
+  "keywords": [
+    "ini-config"
+  ],
+  "author": "Stéphane MBAPE",
   "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/smbape/node-ini-config-parser/issues"
+  },
+  "homepage": "https://github.com/smbape/node-ini-config-parser",
   "dependencies": {
     "ini": "^1.3.4"
   },
