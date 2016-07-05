@@ -1,8 +1,10 @@
-var async = require('async');
+/* jshint mocha: true */
+/* globals assert: false */
+
 var IniConfigParser = require('../');
 var util = require('util');
 
-exports.testDefault = function testDefault(test) {
+exports.testDefault = function testDefault() {
     var config = IniConfigParser.parse(__dirname + '/config.ini'),
         expect = {
             production: {
@@ -42,11 +44,10 @@ exports.testDefault = function testDefault(test) {
             }
         };
 
-    test.deepEqual(config, expect);
-    test.done();
+    assert.deepEqual(config, expect);
 };
 
-exports.testCoerce = function testCoerce(test) {
+exports.testCoerce = function testCoerce() {
     process.env.HOST = '127.0.0.1';
     process.env.PORT = '3000';
     var parse = IniConfigParser(),
@@ -88,12 +89,10 @@ exports.testCoerce = function testCoerce(test) {
                 }
             }
         };
-    test.deepEqual(config, expect);
-    test.done();
+    assert.deepEqual(config, expect);
 };
 
-require('coffee-script').register();
-exports.testExtended = function testExtended(test) {
+exports.testExtended = function testExtended() {
     var fs = require('fs'),
         FSM = require('../src/Parser'),
         comments = [
@@ -106,6 +105,9 @@ exports.testExtended = function testExtended(test) {
             ['line-comment', 'inline comment'],
             ['line-comment', 'inline comment'],
             ['block-comment', 'inline comment'],
+            ['line-comment', 'inline comment'],
+            ['line-comment', 'inline comment'],
+            ['block-comment', 'inline comment']
         ],
         expect = {
             global: {
@@ -124,36 +126,128 @@ exports.testExtended = function testExtended(test) {
                 'key12': 'val12',
                 'key13': 'val13',
                 '\nkey14\n': 'val14',
+                'key15': '\nval15\n',
+                '\nkey16\n': '\nval16\n'
             },
-            sections: {}
+            sections: {
+                'section0': {
+                    'key0': 'val0',
+                    'key1': 'val1"val1"'
+                },
+                'section1': {
+                    'key0': 'val0'
+                },
+                'section2': {
+                    'key0': 'val0'
+                },
+                'section3': {
+                    'key0': 'val0'
+                },
+                'section 4': {
+                    'key0': 'val0'
+                },
+                '\nsection 5\n': {
+                    'key0': 'val0'
+                },
+                '\nsection 6\n': {
+                    'key0': 'val0'
+                },
+                'section7': {},
+                'section8': {},
+                'section9': {
+                    'key0': 'val0',
+                    'key1': 'val1',
+                    'key2': 'val2',
+                    'key3': 'val 3',
+                    'key4': 'val 4',
+                    'key 5': 'val5',
+                    'key 6': 'val 6',
+                    'key7': 'val7',
+                    'key8': 'val8',
+                    'key9': 'val9',
+                    'key10': 'val10',
+                    'key11': 'val11',
+                    'key12': 'val12',
+                    'key13': 'val13',
+                    '\nkey14\n': 'val14',
+                    'key15': '\nval15\n',
+                    '\nkey16\n': '\nval16\n',
+                    'false': false,
+                    'true': true,
+                    'sfalse': 'false',
+                    'strue': 'true',
+                    'esca"ped': "esca'ped",
+                    'htab': '\t',
+                    'cr': '\r',
+                    'lf': '\n',
+                    'vtab': '\v',
+                    'form-feed': '\f',
+                    'backspace': '\b',
+                    'u00FF': '\u00FF',
+                    'u{456}': '\u{456}',
+                    'octal': '\111',
+                    'text': "some\ttext with\nnew line and unicodes u\u0424u and u\u{201}u and octal o\111o.",
+                    'env0': 'VAL0',
+                    'env1': 'VAL0',
+                }
+            }
         },
         config;
-    fsm = new FSM({
+
+    var fsm = new FSM({
+        env: {
+            VAR0: 'VAL0',
+        },
         onComment: function(comment, state) {
             var args = comments.shift();
-            test.deepEqual(args, [state, comment.trim()]);
+            assert.deepEqual(args, [state, comment.trim()]);
         }
     });
 
     config = fsm.parse(fs.readFileSync(__dirname + '/comment.ini', 'utf-8'));
-    test.strictEqual(comments.length, 0);
-    test.deepEqual(config, expect);
+    assert.strictEqual(comments.length, 0);
+    assert.strictEqual(config.sections.section9.text, expect.sections.section9.text);
+    // assert.deepEqual(config, expect);
+    assert.deepEqual(config, expect);
 
-    // test.throws(function() {
-    //     fsm.parse(':toto');
-    // });
-    // test.throws(function() {
-    //     fsm.parse('=toto');
-    // });
-    // test.throws(function() {
-    //     fsm.parse(' :toto');
-    // });
-    // test.throws(function() {
-    //     fsm.parse(' =toto');
-    // });
-    // test.throws(function() {
-    //     fsm.parse('"tata"y= toto');
-    // });
+    // todo: test with new line ${}
 
-    test.done();
+    assert.throws(function() {
+        fsm.parse(':toto');
+    });
+    assert.throws(function() {
+        fsm.parse('=toto');
+    });
+    assert.throws(function() {
+        fsm.parse(' :toto');
+    });
+    assert.throws(function() {
+        fsm.parse(' =toto');
+    });
+    assert.throws(function() {
+        fsm.parse('"tata"y= toto');
+    });
+    assert.throws(function() {
+        fsm.parse('"tata" y = toto');
+    });
+    assert.throws(function() {
+        fsm.parse('"tata""y" = toto');
+    });
+    assert.throws(function() {
+        fsm.parse('toto = "tata"y');
+    });
+    assert.throws(function() {
+        fsm.parse('toto = "tata" y');
+    });
+    assert.throws(function() {
+        fsm.parse('toto = "tata""y"');
+    });
 };
+
+describe('tests', function() {
+    var fn, test;
+    for (test in exports) {
+        fn = exports[test];
+        it(fn.name, fn);
+    }
+});

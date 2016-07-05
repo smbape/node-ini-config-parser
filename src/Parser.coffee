@@ -21,18 +21,45 @@ makeError = (msg, code, pos, clazz = Error)->
     err.code = code if code
     err
 
+# Based on jQuery 1.11
+isNumeric = (obj) ->
+    !Array.isArray( obj ) and (obj - parseFloat( obj ) + 1) >= 0
+
 has = {}.hasOwnProperty
 specialReg = new RegExp '([' + '\\/^$.|?*+()[]{}'.split('').join('\\') + '])', 'g'
 
-class Parser
-    constructor: (proto = {})->
-        for method, fn of proto
-            if !has.call(Parser.prototype, method) and 'function' is typeof fn
-                this[method] = fn
+specialCharMap = {
+    '\\t': '\t'
+    '\\r': '\r'
+    '\\n': '\n'
+    '\\v': '\v'
+    '\\f': '\f'
+    '\\b': '\b'
+    '\\0': '\0'
+}
 
-        @blockCommentSymbol = proto.blockComment or [';;;', '###']
-        @lineCommentSymbol = proto.lineComment or [';', '#']
-        @equalSymbol = proto.equal or [':', '=']
+quoteRegMap = {
+    "'": /[^\r\n\\](')|[\r\n]/g
+    '"': /[^\r\n\\](")|[\r\n]/g
+    "'''": /[^\\](''')/g
+    '"""': /[^\\](""")/g
+}
+
+OCTAL_REG = /^\\([0-7]{1,3})/g
+UNICODE_REG = /^\\u(?:([0-9a-fA-F]{4,5})|\{([0-9a-fA-F]{1,5})\})/g
+
+class Parser
+    constructor: (options = {})->
+        if has.call(options, 'env')
+            @env = options.env
+
+        for prop in ['onComment', 'defaults']
+            if has.call(options, prop) and 'function' is typeof options[prop]
+                @[prop] = options[prop]
+
+        @blockCommentSymbol = options.blockComment or [';;;', '###']
+        @lineCommentSymbol = options.lineComment or [';', '#']
+        @equalSymbol = options.equal or [':', '=']
 
         @blockCommentSymbolEscaped = []
         for symbol, i in @blockCommentSymbol
@@ -49,10 +76,98 @@ class Parser
             @equalSymbolEscaped[i] = @escapeReg(symbol)
 
         @equalOrLineCommentRegSymbol = new RegExp(@equalSymbolEscaped.join('|') + '|' + @lineCommentSymbolEscaped.join('|'), 'g')
-        @lineCommentOrNewLineRegSymbol = new RegExp(@lineCommentSymbolEscaped.join('|') + '|\\r?\\n|\\r|$', 'g')
+        @lineCommentOrNewLineRegSymbol = new RegExp(@lineCommentSymbolEscaped.join('|') + '|[\\r\\n]|$', 'g')
 
     escapeReg: (str)->
         str.replace specialReg, '\\$1'
+
+    coerceString: (str, symbol)->
+        lasIndex = 0
+        if symbol in ['"""', '"']
+            re = /\\(.)|\$(\w+)|(\$\{)|(\})|([\r\n])/g
+        else
+            re = /\\(.)/g
+        res = []
+
+        # https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp
+        while match = re.exec(str)
+            [__, escaped, variable, _keyStart, _keyEnd, lf] = match
+
+            if escaped
+                res.push str.substring(lastIndex, match.index)
+
+                substr = str.substring(match.index, match.index + 7)
+                OCTAL_REG.lastIndex = 0
+                UNICODE_REG.lastIndex = 0
+
+                if octal = OCTAL_REG.exec(substr)
+                    re.lastIndex = match.index + OCTAL_REG.lastIndex
+                    octal = parseInt(octal[1], 8)
+                    octal = String.fromCharCode(octal)
+                    res.push octal
+
+                else if escaped is 'u'
+                    if unicode = UNICODE_REG.exec(substr)
+                        re.lastIndex = match.index + UNICODE_REG.lastIndex
+                        unicode = parseInt(unicode[1] or unicode[2], 16)
+                        unicode = String.fromCodePoint(unicode)
+                        res.push unicode
+                    else
+                        throw makeSynthaxError 'Invalid Unicode escape sequence', @pos, 'UNICODE'
+                else
+                    # escape \\
+                    # \t\r\n\v\f\b
+                    res.push specialCharMap[__] or escaped
+
+                lastIndex = re.lastIndex
+
+            else if variable
+                # env expansion
+                # $\w+
+                res.push str.substring(lastIndex, match.index)
+
+                if has.call @env, variable
+                    variable = @env[variable]
+                else if @defaults
+                    variable = @defaults variable
+                else
+                    variable = '$' + variable
+
+                res.push variable
+                lastIndex = re.lastIndex
+
+            else if _keyEnd and keyStart
+                # env expansion
+                # ${.+}
+                variable = str.substring(keyStart, match.index)
+
+                if has.call @env, variable
+                    variable = @env[variable]
+                else if @defaults
+                    variable = @defaults variable
+                else
+                    variable = '$' + variable
+
+                res.push variable
+                lastIndex = re.lastIndex
+                keyStart = null
+
+            else if _keyStart
+                if not keyStart
+                    keyStart = re.lastIndex
+                    res.push str.substring(lastIndex, match.index)
+                    lastIndex = match.index
+
+            else if keyStart and lf
+                keyStart = null
+
+        if lastIndex
+            if lastIndex < str.length
+                res.push str.substring(lastIndex)
+
+            return res.join('')
+
+        return str
 
     parse: (@input)->
         @len = @input.length
@@ -142,13 +257,12 @@ class Parser
                     return ''
 
                 strStart = @pos
-                re = new RegExp("[^\\\\](" + symbol + ")", 'g')
-                match = @maybeRegExp(re, true)
+                match = @maybeRegExp(quoteRegMap[symbol], true)
                 if match && match[1] is symbol
                     strEnd = match.index + 1
                     str = @input.substring(strStart, strEnd)
-                    return str
-                
+                    return @coerceString str, symbol
+
                 throw makeExpectingError match, symbol, @pos
 
         if symbol = @maybeRegExp(/['"]/g)
@@ -156,12 +270,11 @@ class Parser
                 return ''
 
             strStart = @pos
-            re = new RegExp("[^\\r\\n\\\\](" + symbol + ")|\\r?\\n|\\r", 'g')
-            match = @maybeRegExp(re, true)
+            match = @maybeRegExp(quoteRegMap[symbol], true)
             if match && match[1] is symbol
                 strEnd = match.index + 1
                 str = @input.substring(strStart, strEnd)
-                return str
+                return @coerceString str, symbol
             
             throw makeExpectingError match, symbol, @pos
 
@@ -178,9 +291,27 @@ class Parser
         return
 
     config: (config)->
-        while keyValue = @maybeKeyValue()
+        # global section
+        {global, sections} = config
+        while not (section = @maybeSection()) and (keyValue = @maybeKeyValue())
             [key, value] = keyValue
-            config.global[key] = value
+            global[key] = value
+
+        # sections
+        if section
+            sections[section] or (sections[section] = {})
+            while newSection = @maybeSection()
+                section = newSection
+                sections[section] or (sections[section] = {})
+
+            while keyValue = @maybeKeyValue()
+                [key, value] = keyValue
+                sections[section][key] = value
+
+                while newSection = @maybeSection()
+                    section = newSection
+                    sections[section] or (sections[section] = {})
+
         return config
 
     maybeKeyValue: ->
@@ -188,13 +319,10 @@ class Parser
         if @pos >= @len
             return
 
-        if @pos >= 410
-            debugger
-
         keyStart = @pos
 
         if key = @maybeString()
-            @eatAllSpacesAndComment()
+            @eatSpaceAndComment()
         else
             all = true
 
@@ -204,11 +332,13 @@ class Parser
                 throw makeExpectingError symbol, @equalSymbol, @pos
 
             if not key
-                # TODO: coerce
                 keyEnd = @pos - symbol.length
                 key = @input.substring(keyStart, keyEnd).trim()
+
+            if key is ''
+                throw makeSynthaxError 'Empty key', @pos, 'KEY'
+
         else
-            console.log @equalOrLineCommentRegSymbol.source is ':|=|;|#'
             throw makeExpectingError symbol, @equalSymbol, @pos
 
         @eatAllSpacesAndComment()
@@ -227,9 +357,43 @@ class Parser
             match = @maybeRegExp @lineCommentOrNewLineRegSymbol, true
             valueEnd = match.index
             value = @input.substring(valueStart, valueEnd).trim()
-
             @pos = match.index
 
+            switch value
+                when 'true'
+                    value = true
+                when 'false'
+                    value = false
+                else
+                    if isNumeric value
+                        value = parseFloat(value)
+
         return [key, value]
+
+    maybeSection: ->
+        @eatAllSpacesAndComment()
+        if @pos >= @len
+            return
+
+        if @maybe('[')
+            @eatSpaceAndComment()
+
+            if section = @maybeString()
+                @eatSpaceAndComment()
+            else
+                all = true
+
+            sectionStart = @pos
+            if @maybe(']', all)
+                sectionEnd = @pos - 1
+                if not section
+                    section = @input.substring(sectionStart, sectionEnd).trim()
+
+                if section is ''
+                    throw makeSynthaxError 'Empty section', @pos, 'SECTION'
+
+                return section
+
+            throw makeExpectingError @input[@pos], ']', @pos
 
 module.exports = Parser
