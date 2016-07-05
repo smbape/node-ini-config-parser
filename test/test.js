@@ -2,12 +2,7 @@ var async = require('async');
 var IniConfigParser = require('../');
 var util = require('util');
 
-module.exports = {
-    testDefault: testDefault,
-    testCoerce: testCoerce
-};
-
-function testDefault(assert) {
+exports.testDefault = function testDefault(test) {
     var config = IniConfigParser.parse(__dirname + '/config.ini'),
         expect = {
             production: {
@@ -47,11 +42,11 @@ function testDefault(assert) {
             }
         };
 
-    assert.deepEqual(config, expect);
-    assert.done();
-}
+    test.deepEqual(config, expect);
+    test.done();
+};
 
-function testCoerce(assert) {
+exports.testCoerce = function testCoerce(test) {
     process.env.HOST = '127.0.0.1';
     process.env.PORT = '3000';
     var parse = IniConfigParser(),
@@ -93,29 +88,72 @@ function testCoerce(assert) {
                 }
             }
         };
-    assert.deepEqual(config, expect);
-    assert.done();
-}
+    test.deepEqual(config, expect);
+    test.done();
+};
 
-if (!/\bnodeunit$/.test(process.argv[1])) {
-    var reporter = require('nodeunit').reporters.default;
-    reporter.run({
-        test: module.exports
+require('coffee-script').register();
+exports.testExtended = function testExtended(test) {
+    var fs = require('fs'),
+        FSM = require('../src/Parser'),
+        comments = [
+            ['line-comment', 'comment'],
+            ['line-comment', 'comment'],
+            ['line-comment', 'comment'],
+            ['line-comment', 'comment'],
+            ['block-comment', 'block comment\nblock comment\nblock comment'],
+            ['block-comment', 'block\ncomment'],
+            ['line-comment', 'inline comment'],
+            ['line-comment', 'inline comment'],
+            ['block-comment', 'inline comment'],
+        ],
+        expect = {
+            global: {
+                'key0': 'val0',
+                'key1': 'val1',
+                'key2': 'val2',
+                'key3': 'val 3',
+                'key4': 'val 4',
+                'key 5': 'val5',
+                'key 6': 'val 6',
+                'key7': 'val7',
+                'key8': 'val8',
+                'key9': 'val9',
+                'key10': 'val10',
+                'key11': 'val11',
+                'key12': 'val12',
+                'key13': 'val13',
+                '\nkey14\n': 'val14',
+            },
+            sections: {}
+        },
+        config;
+    fsm = new FSM({
+        onComment: function(comment, state) {
+            var args = comments.shift();
+            test.deepEqual(args, [state, comment.trim()]);
+        }
     });
-} else if (false) {
-    // For debugging purpose
-    var assert = require('assert');
-    var testSuite = module.exports;
-    tests = [];
-    for (prop in testSuite) {
-        (function(fn) {
-            tests.push(function(next) {
-                assert.done = next;
-                fn(assert);
-            });
-        })(testSuite[prop]);
-    }
-    async.series(tests, function() {
-        console.log('done');
-    });
-}
+
+    config = fsm.parse(fs.readFileSync(__dirname + '/comment.ini', 'utf-8'));
+    test.strictEqual(comments.length, 0);
+    test.deepEqual(config, expect);
+
+    // test.throws(function() {
+    //     fsm.parse(':toto');
+    // });
+    // test.throws(function() {
+    //     fsm.parse('=toto');
+    // });
+    // test.throws(function() {
+    //     fsm.parse(' :toto');
+    // });
+    // test.throws(function() {
+    //     fsm.parse(' =toto');
+    // });
+    // test.throws(function() {
+    //     fsm.parse('"tata"y= toto');
+    // });
+
+    test.done();
+};
