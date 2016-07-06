@@ -1,6 +1,6 @@
-require('coffee-script').register();
+// require('coffee-script').register();
 var fs = require('fs'),
-    Parser = require('./src/Parser');
+    Parser = require('./lib/Parser');
 
 exports.Parser = Parser;
 

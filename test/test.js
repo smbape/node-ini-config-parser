@@ -475,6 +475,32 @@ exports.testMissingCoverage = function testMissingCoverage() {
             empty: ''
         };
     assert.deepEqual(config.global, expect);
+
+    assert.throws(function() {
+        IniConfigParser.parse('toto', {
+            ignoreMissingAssign: false
+        });
+    });
+    assert.throws(function() {
+        IniConfigParser.parse('toto ; =', {
+            ignoreMissingAssign: false
+        });
+    });
+    assert.throws(function() {
+        IniConfigParser.parse('toto\ntata ; =', {
+            ignoreMissingAssign: false
+        });
+    });
+
+    assert.deepEqual(IniConfigParser.parse([
+        '"tata" y = toto',
+        '"tata""y" = toto',
+    ].join('\n'), {
+        ignoreInvalidStringKey: true
+    }), {
+        '"tata" y': 'toto',
+        '"tata""y"': 'toto'
+    });
 };
 
 exports.testDefault = function testDefault() {
@@ -638,5 +664,6 @@ describe(__filename.replace(/^(?:.+[\/\\])?([^.\/\\]+)(?:.[^.]+)?$/, '$1'), func
     for (test in exports) {
         fn = exports[test];
         it(fn.name, fn);
+        // break;
     }
 });

@@ -79,6 +79,8 @@ defaultOptions =
     merge: false # return config as merge of global + sections
     escapeValueChar: true # escap \ in value
     emptyValue: '' # empty value
+    ignoreMissingAssign: true
+    ignoreInvalidStringKey: false
 
 class Parser
     constructor: (options = {})->
@@ -108,10 +110,10 @@ class Parser
             @assignSymbolEscaped[i] = @escapeReg(symbol)
 
         if @lineCommentSymbolEscaped
-            @assignOrLineCommentRegSymbol = new RegExp(@assignSymbolEscaped.join('|') + '|' + @lineCommentSymbolEscaped.join('|'), 'g')
+            @assignOrLfOrLineCommentRegSymbol = new RegExp(@assignSymbolEscaped.join('|') + '|' + @lineCommentSymbolEscaped.join('|') + '|[\\r\\n]', 'g')
             @lineCommentOrNewLineRegSymbol = new RegExp(@lineCommentSymbolEscaped.join('|') + '|[\\r\\n]|$', 'g')
         else
-            @assignOrLineCommentRegSymbol = new RegExp(@assignSymbolEscaped.join('|'), 'g')
+            @assignOrLfOrLineCommentRegSymbol = new RegExp(@assignSymbolEscaped.join('|') + '|[\\r\\n]', 'g')
             @lineCommentOrNewLineRegSymbol = new RegExp('[\\r\\n]|$', 'g')
 
     parse: (@input)->
@@ -135,7 +137,7 @@ class Parser
     config: (config)->
         # global section
         {global, sections} = config
-        while not (section = @maybeSection()) and (keyValue = @maybeKeyValue())
+        while not (section = @maybeSection()) and (keyValue = @expectEofOrKeyValue())
             [key, value, isArray] = keyValue
             if isArray
                 global[key] or (global[key] = [])
@@ -151,7 +153,7 @@ class Parser
                 section = newSection
                 sections[section] or (sections[section] = {})
 
-            while keyValue = @maybeKeyValue()
+            while keyValue = @expectEofOrKeyValue()
                 # TODO: multiple key ignore, override, array, throw
                 [key, value, isArray] = keyValue
                 if isArray
@@ -171,7 +173,6 @@ class Parser
         str.replace specialReg, '\\$1'
 
     coerceValue: (str)->
-        # TODO: disable escape char
         lasIndex = 0
         if @options.escapeValueChar
             if @options.env
@@ -272,7 +273,7 @@ class Parser
                         unicode = String.fromCodePoint(unicode)
                         res.push unicode
                     else
-                        # TODO: warn only
+                        # TODO: ignoreInvalidUnicode
                         throw makeSynthaxError 'Invalid Unicode escape sequence', @pos, 'UNICODE'
                 else
                     # escape \\
@@ -395,7 +396,7 @@ class Parser
                 if @maybe(symbol)
                     commentStart = @pos
                     if not @maybe(symbol, true)
-                        # TODO: warn only
+                        # TODO: eofBeforeBlockCommentEnd ignore, end
                         throw makeExpectingError '[EOF]', symbol, @pos
                     if @onComment
                         @onComment @input.substring(commentStart, @pos - symbol.length), 'block-comment'
@@ -426,7 +427,7 @@ class Parser
                         str = @input.substring(strStart, strEnd)
                         return @coerceString str, symbol
 
-                    # TODO: warn only
+                    # TODO: ignoreInvalidString
                     throw makeExpectingError match, symbol, @pos
 
         if @options.string
@@ -441,7 +442,7 @@ class Parser
                     str = @input.substring(strStart, strEnd)
                     return @coerceString str, symbol
 
-                # TODO: warn only
+                # TODO: ignoreInvalidString
                 throw makeExpectingError match, symbol, @pos
 
         return
@@ -456,7 +457,7 @@ class Parser
             continue
         return
 
-    maybeKeyValue: ->
+    expectEofOrKeyValue: ->
         @eatAllSpacesAndComment()
         if @pos >= @len
             return
@@ -465,13 +466,22 @@ class Parser
 
         if key = @maybeString()
             @eatSpaceAndComment()
-        else
-            all = true
 
-        if symbol = @maybeRegExp(@assignOrLineCommentRegSymbol, all)
-            # inline comment
+            if not (symbol = @maybeRegExp(@assignOrLfOrLineCommentRegSymbol))
+                key = null
+                @pos = keyStart
+                if not @options.ignoreInvalidStringKey
+                    throw makeSynthaxError 'Invalid string', @pos, 'INVALID_STRING'
+
+        if symbol or (match = @maybeRegExp(@assignOrLfOrLineCommentRegSymbol, true))
+            if match
+                symbol = match[0]
+
             if @options.lineComment and symbol in @options.lineComment
-                # TODO: warn only
+                if not @options.ignoreMissingAssign
+                    throw makeExpectingError symbol, @options.assign, @pos
+
+            else if /[\r\n]/.test(symbol) and not @options.ignoreMissingAssign
                 throw makeExpectingError symbol, @options.assign, @pos
 
             if not key
@@ -481,18 +491,17 @@ class Parser
                 if @options.array
                     keyLen = key.length
                     if keyLen > 1 and key[keyLen - 2] is '[' and key[keyLen - 1] is ']'
-                        # TODO: optional
                         isArray = true
                         key = key.substring(0, keyLen - 2)
 
             if key is ''
-                # TODO: warn only
+                # TODO: ignoreEmptyKey
                 throw makeSynthaxError 'Empty key', @pos, 'KEY'
 
         else
             throw makeExpectingError symbol, @options.assign, @pos
 
-        @eatAllSpacesAndComment()
+        @eatSpaceAndComment()
         if @pos >= @len
             return [key, @options.emptyValue, isArray]
 
@@ -502,7 +511,7 @@ class Parser
                 if @maybeRegExp(/[\r\n]/g)
                     --@pos
                 else
-                    # TODO: warn only
+                    # TODO: ignoreInvalidStringValue
                     throw makeExpectingError @input[@pos], '[EOF]', @pos
         else
             valueStart = @pos
@@ -549,12 +558,12 @@ class Parser
                     section = @input.substring(sectionStart, sectionEnd).trim()
 
                 if section is ''
-                    # TODO: warn only
+                    # TODO: ignoreEmptySection
                     throw makeSynthaxError 'Empty section', @pos, 'SECTION'
 
                 return section
 
-            # TODO: warn only
+            # TODO: ignoreNotEndedSection
             throw makeExpectingError @input[@pos], ']', @pos
 
     parseFlat: (config)->
