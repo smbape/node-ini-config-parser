@@ -1,9 +1,7 @@
 require('coffee-script').register();
 var fs = require('fs'),
     Parser = require('./src/Parser'),
-    ini = new Parser({
-        nativeType: false
-    });
+    ini = new Parser();
 
 var hasProp = {}.hasOwnProperty;
 

@@ -1,13 +1,86 @@
 /* jshint mocha: true */
 /* globals assert: false */
 
-var IniConfigParser = require('../');
-var util = require('util');
+var IniConfigParser = require('../'),
+    util = require('util'),
+    fs = require('fs'),
+    Parser = require('../src/Parser');
 
-exports.testDefault = function testDefault() {
-    var config = IniConfigParser.parse(__dirname + '/config.ini'),
+exports.testNoDot = function testNoDot() {
+    var parser = new Parser({
+            env: {},
+            nativeType: false,
+            dotKey: false
+        }),
+        data = fs.readFileSync(__dirname + '/config.ini').toString(),
+        config = parser.parse(data),
         expect = {
             production: {
+                'key': 'value',
+                'server.port': '$PORT',
+                'server.host': '$HOST',
+                'redis.host': 'x.x.x.x',
+                'redis.port': '7468',
+                'redis.db': '1',
+                'redis.ttl': '3600'
+            },
+            development: {
+                'key': 'value',
+                'server.port': '$PORT',
+                'server.host': '$HOST',
+                'redis.host': 'localhost',
+                'redis.port': '6379',
+                'redis.db': '1',
+                'redis.ttl': '3600',
+                'smtp.server': '127.0.0.1',
+                'smtp.port': '587',
+                'client.routes.defaults.language': 'fr'
+            }
+        };
+
+    assert.deepEqual(config.sections, expect);
+};
+
+exports.testNoInherit = function testNoInherit() {
+    var parser = new Parser({
+            env: {},
+            nativeType: false,
+            dotKey: false,
+            inherit: false
+        }),
+        data = fs.readFileSync(__dirname + '/config.ini').toString(),
+        config = parser.parse(data),
+        expect = {
+            production: {
+                'server.port': '$PORT',
+                'server.host': '$HOST',
+                'redis.host': 'x.x.x.x',
+                'redis.port': '7468',
+                'redis.db': '1',
+                'redis.ttl': '3600'
+            },
+            'development : production': {
+                'redis.host': 'localhost',
+                'redis.port': '6379',
+                'smtp.server': '127.0.0.1',
+                'smtp.port': '587',
+                'client.routes.defaults.language': 'fr'
+            }
+        };
+
+    assert.deepEqual(config.sections, expect);
+};
+
+exports.testNoEnv = function testNoEnv() {
+    var parser = new Parser({
+            env: {},
+            nativeType: false
+        }),
+        data = fs.readFileSync(__dirname + '/config.ini').toString(),
+        config = parser.parse(data),
+        expect = {
+            production: {
+                key: 'value',
                 server: {
                     port: '$PORT',
                     host: '$HOST'
@@ -20,6 +93,7 @@ exports.testDefault = function testDefault() {
                 }
             },
             development: {
+                key: 'value',
                 server: {
                     port: '$PORT',
                     host: '$HOST'
@@ -44,16 +118,21 @@ exports.testDefault = function testDefault() {
             }
         };
 
-    assert.deepEqual(config, expect);
+    assert.deepEqual(config.sections, expect);
 };
 
- exports.testCoerce = function testCoerce() {
-    process.env.HOST = '127.0.0.1';
-    process.env.PORT = '3000';
-    var parse = IniConfigParser(),
-        config = parse(__dirname + '/config.ini'),
+exports.testEnv = function testEnv() {
+    var parser = new Parser({
+            env: {
+                HOST: '127.0.0.1',
+                PORT: '3000'
+            }
+        }),
+        data = fs.readFileSync(__dirname + '/config.ini').toString(),
+        config = parser.parse(data),
         expect = {
             development: {
+                key: 'value',
                 server: {
                     port: '3000',
                     host: '127.0.0.1'
@@ -77,6 +156,7 @@ exports.testDefault = function testDefault() {
                 }
             },
             production: {
+                key: 'value',
                 server: {
                     port: '3000',
                     host: '127.0.0.1'
@@ -89,15 +169,12 @@ exports.testDefault = function testDefault() {
                 }
             }
         };
-    assert.deepEqual(config, expect);
+    assert.deepEqual(config.sections, expect);
 };
 
-var fs = require('fs'),
-    data = fs.readFileSync(__dirname + '/comment.ini', 'utf-8'),
-    Parser = require('../src/Parser');
-
- exports.testExtended = function testExtended() {
-    var comments = [
+exports.testDefault = function testDefault() {
+    var data = fs.readFileSync(__dirname + '/full.ini', 'utf-8').toString(),
+        comments = [
             ['line-comment', 'comment'],
             ['line-comment', 'comment'],
             ['line-comment', 'comment'],
@@ -202,8 +279,10 @@ var fs = require('fs'),
         config;
 
     var fsm = new Parser({
+        inherit: false,
+        dotKey: false,
         env: {
-            VAR0: 'VAL0',
+            VAR0: 'VAL0'
         },
         onComment: function(comment, state) {
             var args = comments.shift();
@@ -249,7 +328,7 @@ var fs = require('fs'),
     });
 };
 
-describe('tests', function() {
+describe(__filename.replace(/^(?:.+[\/\\])?([^.\/\\]+)(?:.[^.]+)?$/, '$1'), function() {
     var fn, test;
     for (test in exports) {
         fn = exports[test];

@@ -1,3 +1,4 @@
+has = {}.hasOwnProperty
 
 makeExpectingError = (actual, expected, pos, code = 'EXPECTED')->
     msg = "Excpecting #{expected}. Instead get #{actual}."
@@ -22,13 +23,31 @@ makeError = (msg, code, pos, clazz = Error)->
     err
 
 # Based on jQuery 1.11
-isNumeric = (obj) ->
+isNumeric = (obj)->
     !Array.isArray( obj ) and (obj - parseFloat( obj ) + 1) >= 0
 
-has = {}.hasOwnProperty
+isObject = (value)->
+    type = typeof value
+    type is 'function' or value and type is 'object'
+
+extend = (dst, src)->
+    if null is dst or 'object' isnt typeof dst or null is src or 'object' isnt typeof src
+        return dst
+    for key of src
+        dst[key] = src[key]
+    dst
+
+defaults = (dst, src)->
+    if null is dst or 'object' isnt typeof dst or null is src or 'object' isnt typeof src
+        return dst
+    for key of src
+        if !has.call(dst, key)
+            dst[key] = src[key]
+    dst
+
 specialReg = new RegExp '([' + '\\/^$.|?*+()[]{}'.split('').join('\\') + '])', 'g'
 
-specialCharMap = {
+specialCharMap =
     '\\t': '\t'
     '\\r': '\r'
     '\\n': '\n'
@@ -36,43 +55,51 @@ specialCharMap = {
     '\\f': '\f'
     '\\b': '\b'
     '\\0': '\0'
-}
 
-quoteRegMap = {
+quoteRegMap =
     "'": /[^\r\n\\](')|[\r\n]/g
     '"': /[^\r\n\\](")|[\r\n]/g
     "'''": /[^\\](''')/g
     '"""': /[^\\](""")/g
-}
 
 OCTAL_REG = /^\\([0-7]{1,3})/g
 UNICODE_REG = /^\\u(?:([0-9a-fA-F]{4,5})|\{([0-9a-fA-F]{1,5})\})/g
 
+defaultOptions =
+    env: process.env
+    blockComment: [';;;', '###']
+    lineComment: [';', '#']
+    equal: [':', '=']
+    nativeType: true
+    dotKey: true
+    inherit: true
+
 class Parser
     constructor: (options = {})->
-        @env = if has.call(options, 'env') then options.env else {}
-        @nativeType = if has.call(options, 'nativeType') then options.nativeType else true
+        @options = {}
+
+        for prop of defaultOptions
+            @options[prop] = if has.call(options, prop) then options[prop] else defaultOptions[prop]
+
+        # @options.env = if has.call(options, 'env') then options.env else {}
+        # @options.nativeType = if has.call(options, 'nativeType') then options.nativeType else true
 
         for prop in ['onComment', 'defaults']
             if has.call(options, prop) and 'function' is typeof options[prop]
                 @[prop] = options[prop]
 
-        @blockCommentSymbol = options.blockComment or [';;;', '###']
-        @lineCommentSymbol = options.lineComment or [';', '#']
-        @equalSymbol = options.equal or [':', '=']
-
         @blockCommentSymbolEscaped = []
-        for symbol, i in @blockCommentSymbol
+        for symbol, i in @options.blockComment
             @blockCommentSymbolEscaped[i] = @escapeReg(symbol)
         @blockCommentRegSymbol = new RegExp @blockCommentSymbolEscaped.join('|'), 'g'
 
         @lineCommentSymbolEscaped = []
-        for symbol, i in @lineCommentSymbol
+        for symbol, i in @options.lineComment
             @lineCommentSymbolEscaped[i] = @escapeReg(symbol)
         @lineCommentRegSymbol = new RegExp @lineCommentSymbolEscaped.join('|'), 'g'
 
         @equalSymbolEscaped = []
-        for symbol, i in @equalSymbol
+        for symbol, i in @options.equal
             @equalSymbolEscaped[i] = @escapeReg(symbol)
 
         @equalOrLineCommentRegSymbol = new RegExp(@equalSymbolEscaped.join('|') + '|' + @lineCommentSymbolEscaped.join('|'), 'g')
@@ -84,6 +111,13 @@ class Parser
         config = {global: {}, sections: {}}
         @config(config)
         @mustEnd()
+
+        if @options.inherit
+            @inherit config
+
+        if @options.dotKey
+            @dotKey config
+
         config
 
     config: (config)->
@@ -139,8 +173,8 @@ class Parser
                 # $\w+
                 res.push str.substring(lastIndex, match.index)
 
-                if has.call @env, variable
-                    variable = @env[variable]
+                if has.call @options.env, variable
+                    variable = @options.env[variable]
                 else if @defaults
                     variable = @defaults variable
                 else
@@ -154,8 +188,8 @@ class Parser
                 # ${.+}
                 variable = str.substring(keyStart, match.index)
 
-                if has.call @env, variable
-                    variable = @env[variable]
+                if has.call @options.env, variable
+                    variable = @options.env[variable]
                 else if @defaults
                     variable = @defaults variable
                 else
@@ -228,8 +262,8 @@ class Parser
                 # $\w+
                 res.push str.substring(lastIndex, match.index)
 
-                if has.call @env, variable
-                    variable = @env[variable]
+                if has.call @options.env, variable
+                    variable = @options.env[variable]
                 else if @defaults
                     variable = @defaults variable
                 else
@@ -243,8 +277,8 @@ class Parser
                 # ${.+}
                 variable = str.substring(keyStart, match.index)
 
-                if has.call @env, variable
-                    variable = @env[variable]
+                if has.call @options.env, variable
+                    variable = @options.env[variable]
                 else if @defaults
                     variable = @defaults variable
                 else
@@ -327,7 +361,7 @@ class Parser
         return pos isnt @pos
 
     eatComment: ->
-        for symbol in @blockCommentSymbol
+        for symbol in @options.blockComment
             if @maybe(symbol)
                 commentStart = @pos
                 if not @maybe(symbol, true)
@@ -337,7 +371,7 @@ class Parser
                     @onComment @input.substring(commentStart, @pos - symbol.length), 'block-comment'
                 return true
 
-        for symbol in @lineCommentSymbol
+        for symbol in @options.lineComment
             if @maybe(symbol)
                 commentStart = @pos
                 match = @maybeRegExp /\r?\n|\r|$/g, true
@@ -401,9 +435,9 @@ class Parser
 
         if symbol = @maybeRegExp(@equalOrLineCommentRegSymbol, all)
             # inline comment
-            if symbol in @lineCommentSymbol
+            if symbol in @options.lineComment
                 # TODO: warn only
-                throw makeExpectingError symbol, @equalSymbol, @pos
+                throw makeExpectingError symbol, @options.equal, @pos
 
             if not key
                 keyEnd = @pos - symbol.length
@@ -419,7 +453,7 @@ class Parser
                 throw makeSynthaxError 'Empty key', @pos, 'KEY'
 
         else
-            throw makeExpectingError symbol, @equalSymbol, @pos
+            throw makeExpectingError symbol, @options.equal, @pos
 
         @eatAllSpacesAndComment()
         if @pos >= @len
@@ -442,7 +476,7 @@ class Parser
 
             # TODO: JSON parse {...}
 
-            if @nativeType
+            if @options.nativeType
                 switch value
                     when 'true'
                         value = true
@@ -485,5 +519,64 @@ class Parser
 
             # TODO: warn only
             throw makeExpectingError @input[@pos], ']', @pos
+
+    parseFlat: (config)->
+        parsedConfig = {}
+        for key, value of config
+            properties = key.split('.')
+            _len = properties.length
+            if _len < 2
+                parsedConfig[key] = value
+                continue
+            next = parsedConfig
+
+            for i in [0..._len] by 1
+                property = properties[i]
+
+                if i is _len - 1
+                    next[property] = value
+                    break
+
+                if !has.call(next, property)
+                    next[property] = {}
+
+                next = next[property]
+
+        parsedConfig
+
+    inherit: (config)->
+        configs = config.sections
+
+        for section of configs
+            defaults configs[section], config.global
+
+            if !/\s*:\s*/.test(section)
+                continue
+
+            sections = section.split(/\s*:\s*/)
+            child = sections[0]
+            configs[child] = {}
+
+            for i in [1...sections.length] by 1
+                parent = sections[i]
+                if !has.call(configs, parent)
+                    continue
+
+                extend configs[child], configs[parent]
+
+            extend configs[child], configs[section]
+            delete configs[section]
+
+        config
+
+    dotKey: (config)->
+        configs = config.sections
+
+        config.global = @parseFlat config.global
+
+        for section of configs
+            configs[section] = @parseFlat configs[section]
+
+        configs
 
 module.exports = Parser
