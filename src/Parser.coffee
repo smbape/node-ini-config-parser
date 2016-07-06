@@ -5,10 +5,10 @@ makeExpectingError = (actual, expected, pos, code = 'EXPECTED')->
     err = makeSynthaxError msg, pos, code
     err
 
-makeUnExpectingError = (actual, pos, code = 'UNEXPECTED')->
-    msg = "Unexpected token #{actual}."
-    err = makeSynthaxError msg, pos, code
-    err
+# makeUnExpectingError = (actual, pos, code = 'UNEXPECTED')->
+#     msg = "Unexpected token #{actual}."
+#     err = makeSynthaxError msg, pos, code
+#     err
 
 makeSynthaxError = (msg, pos, code)->
     err = makeError msg, code, pos, SyntaxError
@@ -26,9 +26,9 @@ makeError = (msg, code, pos, clazz = Error)->
 isNumeric = (obj)->
     !Array.isArray( obj ) and (obj - parseFloat( obj ) + 1) >= 0
 
-isObject = (value)->
-    type = typeof value
-    type is 'function' or value and type is 'object'
+# isObject = (value)->
+#     type = typeof value
+#     type is 'function' or value and type is 'object'
 
 extend = (dst, src)->
     if null is dst or 'object' isnt typeof dst or null is src or 'object' isnt typeof src
@@ -66,13 +66,19 @@ OCTAL_REG = /^\\([0-7]{1,3})/g
 UNICODE_REG = /^\\u(?:([0-9a-fA-F]{4,5})|\{([0-9a-fA-F]{1,5})\})/g
 
 defaultOptions =
-    env: process.env
-    blockComment: [';;;', '###']
-    lineComment: [';', '#']
-    equal: [':', '=']
-    nativeType: true
-    dotKey: true
-    inherit: true
+    env: process.env # used for variable extension
+    blockComment: [';;;', '###'] # used to delimit block comment. Set to false if you don't want block comment
+    lineComment: [';', '#'] # used to delimit line comment. Set to false if you don't want line comment
+    assign: [':', '='] # used to set assign sign
+    nativeType: true # will transform boolean and numbers into native type when not quoted
+    dotKey: true # a.b.c = value will be parse as '{a: {b: {c: value}}}' instead of ['a.b.c'] = value
+    inherit: true # enable section inheritance. [a: b : c : ...]. similar to _.defaults(a, b, c)
+    array: true # parse key[] = value as {key: [value]} instead of {'key[]': 'value'}
+    string: true # parse 'key' as a javascript string. i.e '\t\r\n\v\f\uhhhh\u{hhhhh}'
+    mstring: true # enable multiline strings
+    merge: false # return config as merge of global + sections
+    escapeValueChar: true # escap \ in value
+    emptyValue: '' # empty value
 
 class Parser
     constructor: (options = {})->
@@ -81,29 +87,32 @@ class Parser
         for prop of defaultOptions
             @options[prop] = if has.call(options, prop) then options[prop] else defaultOptions[prop]
 
-        # @options.env = if has.call(options, 'env') then options.env else {}
-        # @options.nativeType = if has.call(options, 'nativeType') then options.nativeType else true
-
         for prop in ['onComment', 'defaults']
             if has.call(options, prop) and 'function' is typeof options[prop]
                 @[prop] = options[prop]
 
-        @blockCommentSymbolEscaped = []
-        for symbol, i in @options.blockComment
-            @blockCommentSymbolEscaped[i] = @escapeReg(symbol)
-        @blockCommentRegSymbol = new RegExp @blockCommentSymbolEscaped.join('|'), 'g'
+        if @options.blockComment
+            @blockCommentSymbolEscaped = []
+            for symbol, i in @options.blockComment
+                @blockCommentSymbolEscaped[i] = @escapeReg(symbol)
+            @blockCommentRegSymbol = new RegExp @blockCommentSymbolEscaped.join('|'), 'g'
 
-        @lineCommentSymbolEscaped = []
-        for symbol, i in @options.lineComment
-            @lineCommentSymbolEscaped[i] = @escapeReg(symbol)
-        @lineCommentRegSymbol = new RegExp @lineCommentSymbolEscaped.join('|'), 'g'
+        if @options.lineComment
+            @lineCommentSymbolEscaped = []
+            for symbol, i in @options.lineComment
+                @lineCommentSymbolEscaped[i] = @escapeReg(symbol)
+            @lineCommentRegSymbol = new RegExp @lineCommentSymbolEscaped.join('|'), 'g'
 
-        @equalSymbolEscaped = []
-        for symbol, i in @options.equal
-            @equalSymbolEscaped[i] = @escapeReg(symbol)
+        @assignSymbolEscaped = []
+        for symbol, i in @options.assign
+            @assignSymbolEscaped[i] = @escapeReg(symbol)
 
-        @equalOrLineCommentRegSymbol = new RegExp(@equalSymbolEscaped.join('|') + '|' + @lineCommentSymbolEscaped.join('|'), 'g')
-        @lineCommentOrNewLineRegSymbol = new RegExp(@lineCommentSymbolEscaped.join('|') + '|[\\r\\n]|$', 'g')
+        if @lineCommentSymbolEscaped
+            @assignOrLineCommentRegSymbol = new RegExp(@assignSymbolEscaped.join('|') + '|' + @lineCommentSymbolEscaped.join('|'), 'g')
+            @lineCommentOrNewLineRegSymbol = new RegExp(@lineCommentSymbolEscaped.join('|') + '|[\\r\\n]|$', 'g')
+        else
+            @assignOrLineCommentRegSymbol = new RegExp(@assignSymbolEscaped.join('|'), 'g')
+            @lineCommentOrNewLineRegSymbol = new RegExp('[\\r\\n]|$', 'g')
 
     parse: (@input)->
         @len = @input.length
@@ -113,10 +122,13 @@ class Parser
         @mustEnd()
 
         if @options.inherit
-            @inherit config
+            config = @inherit config
 
         if @options.dotKey
-            @dotKey config
+            config = @dotKey config
+
+        if @options.merge
+            config = defaults config.sections, config.global
 
         config
 
@@ -159,12 +171,24 @@ class Parser
         str.replace specialReg, '\\$1'
 
     coerceValue: (str)->
+        # TODO: disable escape char
         lasIndex = 0
-        re = /\\(.)|\$(\w+)|(\$\{)|(\})/g
+        if @options.escapeValueChar
+            if @options.env
+                re = /\\(.)|\$(\w+)|(\$\{)|(\})/g
+            else
+                re = /\\(.)/g
+        else if @options.env
+            re = /($[^$])|\$(\w+)|(\$\{)|(\})/g
+        else
+            return str
+
         res = []
         while match = re.exec(str)
             [__, escaped, variable, _keyStart, _keyEnd] = match
+
             if escaped
+                res.push str.substring(lastIndex, match.index)
                 res.push escaped
                 lastIndex = re.lastIndex
 
@@ -178,7 +202,7 @@ class Parser
                 else if @defaults
                     variable = @defaults variable
                 else
-                    variable = '$' + variable
+                    variable = __
 
                 res.push variable
                 lastIndex = re.lastIndex
@@ -193,20 +217,16 @@ class Parser
                 else if @defaults
                     variable = @defaults variable
                 else
-                    variable = '$' + variable
+                    variable = str.substring(lastIndex, re.lastIndex)
 
                 res.push variable
                 lastIndex = re.lastIndex
                 keyStart = null
 
             else if _keyStart
-                if not keyStart
-                    keyStart = re.lastIndex
-                    res.push str.substring(lastIndex, match.index)
-                    lastIndex = match.index
-
-            else if keyStart and lf
-                keyStart = null
+                keyStart = re.lastIndex
+                res.push str.substring(lastIndex, match.index)
+                lastIndex = match.index
 
         if lastIndex
             if lastIndex < str.length
@@ -218,7 +238,7 @@ class Parser
 
     coerceString: (str, symbol)->
         lasIndex = 0
-        if symbol in ['"""', '"']
+        if @options.env and symbol in ['"""', '"']
             re = /\\(.)|\$(\w+)|(\$\{)|(\})|([\r\n])/g
         else
             re = /\\(.)/g
@@ -229,6 +249,10 @@ class Parser
             [__, escaped, variable, _keyStart, _keyEnd, lf] = match
 
             if escaped
+                if keyStart
+                    # bad substitution
+                    keyStart = null
+
                 res.push str.substring(lastIndex, match.index)
 
                 substr = str.substring(match.index, match.index + 7)
@@ -258,6 +282,10 @@ class Parser
                 lastIndex = re.lastIndex
 
             else if variable
+                if keyStart
+                    # bad substitution
+                    keyStart = null
+
                 # env expansion
                 # $\w+
                 res.push str.substring(lastIndex, match.index)
@@ -267,7 +295,7 @@ class Parser
                 else if @defaults
                     variable = @defaults variable
                 else
-                    variable = '$' + variable
+                    variable = __
 
                 res.push variable
                 lastIndex = re.lastIndex
@@ -282,19 +310,20 @@ class Parser
                 else if @defaults
                     variable = @defaults variable
                 else
-                    variable = '$' + variable
+                    variable = str.substring(lastIndex, re.lastIndex)
 
                 res.push variable
                 lastIndex = re.lastIndex
                 keyStart = null
 
             else if _keyStart
-                if not keyStart
-                    keyStart = re.lastIndex
-                    res.push str.substring(lastIndex, match.index)
-                    lastIndex = match.index
+                keyStart = re.lastIndex
+                res.push str.substring(lastIndex, match.index)
+                lastIndex = match.index
 
             else if keyStart and lf
+                res.push str.substring(lastIndex, re.lastIndex)
+                lastIndex = re.lastIndex
                 keyStart = null
 
         if lastIndex
@@ -361,27 +390,47 @@ class Parser
         return pos isnt @pos
 
     eatComment: ->
-        for symbol in @options.blockComment
-            if @maybe(symbol)
-                commentStart = @pos
-                if not @maybe(symbol, true)
-                    # TODO: warn only
-                    throw makeExpectingError '[EOF]', symbol, @pos
-                if @onComment
-                    @onComment @input.substring(commentStart, @pos - symbol.length), 'block-comment'
-                return true
+        if @options.blockComment
+            for symbol in @options.blockComment
+                if @maybe(symbol)
+                    commentStart = @pos
+                    if not @maybe(symbol, true)
+                        # TODO: warn only
+                        throw makeExpectingError '[EOF]', symbol, @pos
+                    if @onComment
+                        @onComment @input.substring(commentStart, @pos - symbol.length), 'block-comment'
+                    return true
 
-        for symbol in @options.lineComment
-            if @maybe(symbol)
-                commentStart = @pos
-                match = @maybeRegExp /\r?\n|\r|$/g, true
-                @onComment @input.substring(commentStart, match.index), 'line-comment'
-                return true
+        if @options.lineComment
+            for symbol in @options.lineComment
+                if @maybe(symbol)
+                    commentStart = @pos
+                    match = @maybeRegExp /\r?\n|\r|$/g, true
+                    if @onComment
+                        @onComment @input.substring(commentStart, match.index), 'line-comment'
+                    return true
+
         return
 
     maybeString: ->
-        for symbol in ['"""', "'''"]
-            if @maybe(symbol)
+        if @options.mstring
+            for symbol in ['"""', "'''"]
+                if @maybe(symbol)
+                    if @maybe(symbol)
+                        return ''
+
+                    strStart = @pos
+                    match = @maybeRegExp(quoteRegMap[symbol], true)
+                    if match && match[1] is symbol
+                        strEnd = match.index + 1
+                        str = @input.substring(strStart, strEnd)
+                        return @coerceString str, symbol
+
+                    # TODO: warn only
+                    throw makeExpectingError match, symbol, @pos
+
+        if @options.string
+            if symbol = @maybeRegExp(/['"]/g)
                 if @maybe(symbol)
                     return ''
 
@@ -394,20 +443,6 @@ class Parser
 
                 # TODO: warn only
                 throw makeExpectingError match, symbol, @pos
-
-        if symbol = @maybeRegExp(/['"]/g)
-            if @maybe(symbol)
-                return ''
-
-            strStart = @pos
-            match = @maybeRegExp(quoteRegMap[symbol], true)
-            if match && match[1] is symbol
-                strEnd = match.index + 1
-                str = @input.substring(strStart, strEnd)
-                return @coerceString str, symbol
-
-            # TODO: warn only
-            throw makeExpectingError match, symbol, @pos
 
         return
 
@@ -433,31 +468,33 @@ class Parser
         else
             all = true
 
-        if symbol = @maybeRegExp(@equalOrLineCommentRegSymbol, all)
+        if symbol = @maybeRegExp(@assignOrLineCommentRegSymbol, all)
             # inline comment
-            if symbol in @options.lineComment
+            if @options.lineComment and symbol in @options.lineComment
                 # TODO: warn only
-                throw makeExpectingError symbol, @options.equal, @pos
+                throw makeExpectingError symbol, @options.assign, @pos
 
             if not key
                 keyEnd = @pos - symbol.length
                 key = @input.substring(keyStart, keyEnd).trim()
-                keyLen = key.length
-                if keyLen > 1 and key[keyLen - 2] is '[' and key[keyLen - 1] is ']'
-                    # TODO: optional
-                    isArray = true
-                    key = key.substring(0, keyLen - 2)
+
+                if @options.array
+                    keyLen = key.length
+                    if keyLen > 1 and key[keyLen - 2] is '[' and key[keyLen - 1] is ']'
+                        # TODO: optional
+                        isArray = true
+                        key = key.substring(0, keyLen - 2)
 
             if key is ''
                 # TODO: warn only
                 throw makeSynthaxError 'Empty key', @pos, 'KEY'
 
         else
-            throw makeExpectingError symbol, @options.equal, @pos
+            throw makeExpectingError symbol, @options.assign, @pos
 
         @eatAllSpacesAndComment()
         if @pos >= @len
-            return [key]
+            return [key, @options.emptyValue, isArray]
 
         if value = @maybeString()
             @eatSpaceAndComment()
@@ -577,6 +614,6 @@ class Parser
         for section of configs
             configs[section] = @parseFlat configs[section]
 
-        configs
+        config
 
 module.exports = Parser

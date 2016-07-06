@@ -1,10 +1,76 @@
 /* jshint mocha: true */
 /* globals assert: false */
 
-var IniConfigParser = require('../'),
-    util = require('util'),
+var util = require('util'),
     fs = require('fs'),
-    Parser = require('../src/Parser');
+    IniConfigParser = require('../'),
+    Parser = IniConfigParser.Parser;
+
+exports.testExport = function testExport() {
+    var file = __dirname + '/config.ini',
+        data = fs.readFileSync(file).toString(),
+        config = IniConfigParser.parse(data, {
+            env: {
+                HOST: '127.0.0.1',
+                PORT: '3000'
+            }
+        }),
+        expect = {
+            key: 'value',
+            array: ['g0', 'g1'],
+            production: {
+                key: 'value',
+                server: {
+                    port: '3000',
+                    host: '127.0.0.1'
+                },
+                redis: {
+                    host: 'x.x.x.x',
+                    port: 7468,
+                    db: 1,
+                    ttl: 3600
+                },
+                array: ['g0', 'g1']
+            },
+            development: {
+                key: 'value',
+                server: {
+                    port: '3000',
+                    host: '127.0.0.1'
+                },
+                redis: {
+                    host: 'localhost',
+                    port: 6379,
+                    db: 1,
+                    ttl: 3600
+                },
+                smtp: {
+                    server: '127.0.0.1',
+                    port: 587
+                },
+                client: {
+                    routes: {
+                        defaults: {
+                            language: 'fr'
+                        }
+                    }
+                },
+                array: ['item0', 'item1'],
+                strkey: 'strvalue',
+                mstrkey: 'mstrvalue'
+            }
+        };
+
+    assert.deepEqual(config, expect);
+
+    config = IniConfigParser.parseFile(file, {
+        env: {
+            HOST: '127.0.0.1',
+            PORT: '3000'
+        }
+    });
+    assert.deepEqual(config, expect);
+};
 
 exports.testNoDot = function testNoDot() {
     var parser = new Parser({
@@ -17,6 +83,7 @@ exports.testNoDot = function testNoDot() {
         expect = {
             production: {
                 'key': 'value',
+                'array': ['g0', 'g1'],
                 'server.port': '$PORT',
                 'server.host': '$HOST',
                 'redis.host': 'x.x.x.x',
@@ -34,7 +101,51 @@ exports.testNoDot = function testNoDot() {
                 'redis.ttl': '3600',
                 'smtp.server': '127.0.0.1',
                 'smtp.port': '587',
-                'client.routes.defaults.language': 'fr'
+                'client.routes.defaults.language': 'fr',
+                'array': ['item0', 'item1'],
+                'strkey': 'strvalue',
+                'mstrkey': 'mstrvalue'
+            }
+        };
+
+    assert.deepEqual(config.sections, expect);
+};
+
+exports.testNoString = function testNoString() {
+    var parser = new Parser({
+            env: {},
+            nativeType: false,
+            dotKey: false,
+            string: false,
+            mstring: false
+        }),
+        data = fs.readFileSync(__dirname + '/config.ini').toString(),
+        config = parser.parse(data),
+        expect = {
+            production: {
+                'key': 'value',
+                'array': ['g0', 'g1'],
+                'server.port': '$PORT',
+                'server.host': '$HOST',
+                'redis.host': 'x.x.x.x',
+                'redis.port': '7468',
+                'redis.db': '1',
+                'redis.ttl': '3600'
+            },
+            development: {
+                'key': 'value',
+                'server.port': '$PORT',
+                'server.host': '$HOST',
+                'redis.host': 'localhost',
+                'redis.port': '6379',
+                'redis.db': '1',
+                'redis.ttl': '3600',
+                'smtp.server': '127.0.0.1',
+                'smtp.port': '587',
+                'client.routes.defaults.language': 'fr',
+                'array': ['item0', 'item1'],
+                "'strkey'": "'strvalue'",
+                "'''mstrkey'''": "'''mstrvalue'''"
             }
         };
 
@@ -64,57 +175,44 @@ exports.testNoInherit = function testNoInherit() {
                 'redis.port': '6379',
                 'smtp.server': '127.0.0.1',
                 'smtp.port': '587',
-                'client.routes.defaults.language': 'fr'
+                'client.routes.defaults.language': 'fr',
+                'array': ['item0', 'item1'],
+                'strkey': 'strvalue',
+                'mstrkey': 'mstrvalue'
             }
         };
 
     assert.deepEqual(config.sections, expect);
 };
 
-exports.testNoEnv = function testNoEnv() {
+exports.testNoArray = function testNoArray() {
     var parser = new Parser({
             env: {},
-            nativeType: false
+            nativeType: false,
+            dotKey: false,
+            inherit: false,
+            array: false
         }),
         data = fs.readFileSync(__dirname + '/config.ini').toString(),
         config = parser.parse(data),
         expect = {
             production: {
-                key: 'value',
-                server: {
-                    port: '$PORT',
-                    host: '$HOST'
-                },
-                redis: {
-                    host: 'x.x.x.x',
-                    port: '7468',
-                    db: '1',
-                    ttl: '3600'
-                }
+                'server.port': '$PORT',
+                'server.host': '$HOST',
+                'redis.host': 'x.x.x.x',
+                'redis.port': '7468',
+                'redis.db': '1',
+                'redis.ttl': '3600'
             },
-            development: {
-                key: 'value',
-                server: {
-                    port: '$PORT',
-                    host: '$HOST'
-                },
-                redis: {
-                    host: 'localhost',
-                    port: '6379',
-                    db: '1',
-                    ttl: '3600'
-                },
-                smtp: {
-                    server: '127.0.0.1',
-                    port: '587'
-                },
-                client: {
-                    routes: {
-                        defaults: {
-                            language: 'fr'
-                        }
-                    }
-                }
+            'development : production': {
+                'redis.host': 'localhost',
+                'redis.port': '6379',
+                'smtp.server': '127.0.0.1',
+                'smtp.port': '587',
+                'client.routes.defaults.language': 'fr',
+                'array[]': 'item1',
+                'strkey': 'strvalue',
+                'mstrkey': 'mstrvalue'
             }
         };
 
@@ -131,6 +229,20 @@ exports.testEnv = function testEnv() {
         data = fs.readFileSync(__dirname + '/config.ini').toString(),
         config = parser.parse(data),
         expect = {
+            production: {
+                key: 'value',
+                array: ['g0', 'g1'],
+                server: {
+                    port: '3000',
+                    host: '127.0.0.1'
+                },
+                redis: {
+                    host: 'x.x.x.x',
+                    port: 7468,
+                    db: 1,
+                    ttl: 3600
+                }
+            },
             development: {
                 key: 'value',
                 server: {
@@ -153,23 +265,216 @@ exports.testEnv = function testEnv() {
                             language: 'fr'
                         }
                     }
-                }
-            },
-            production: {
-                key: 'value',
-                server: {
-                    port: '3000',
-                    host: '127.0.0.1'
                 },
-                redis: {
-                    host: 'x.x.x.x',
-                    port: 7468,
-                    db: 1,
-                    ttl: 3600
-                }
+                array: ['item0', 'item1'],
+                strkey: 'strvalue',
+                mstrkey: 'mstrvalue'
             }
         };
     assert.deepEqual(config.sections, expect);
+};
+
+exports.testNoLineComment = function testNoLineComment() {
+    var parser = new Parser({
+            blockComment: false,
+            lineComment: false
+        }),
+        data = "key = value ; comment\nanother; comment = value\na ;;;block;;; = with;;;value",
+        config = parser.parse(data),
+        expect = {
+            key: 'value ; comment',
+            'another; comment': 'value',
+            'a ;;;block;;;': 'with;;;value'
+        };
+    assert.deepEqual(config.global, expect);
+};
+
+exports.testEnv = function testEnv() {
+    var parser = new Parser({
+            env: {}
+        }),
+        data = [
+            "key = **$value**",
+            "brace = **${brace}**",
+            'falty = "**${falty\\ns}**"',
+            'mstring = """**${falty\ns}**"""',
+            "another = **${another}**",
+            "notexpanded = '$notexpanded'",
+            "notexpanded2 = '${notexpanded}'",
+            "notfound0 = \"**$notfound0**\"",
+            "notfound1 = \"**${notfound1}**\"",
+            "notfound2 = **$notfound2**",
+            "notfound3 = **${notfound3}**",
+            "nested = **${xxx${value}**",
+            "nestedstr = \"**${xxx${value}**\"",
+            "nestedw = **${xxx$value**",
+            "nestedwstr = \"**${xxx$value**\"",
+            "atend = **${atend"
+        ].join('\n'),
+        config, expect;
+
+    // keep as is when no en found
+    config = parser.parse(data);
+    expect = {
+        key: '**$value**',
+        brace: '**${brace}**',
+        falty: '**${falty\ns}**',
+        mstring: '**${falty\ns}**',
+        another: '**${another}**',
+        notexpanded: '$notexpanded',
+        notexpanded2: '${notexpanded}',
+        notfound0: '**$notfound0**',
+        notfound1: '**${notfound1}**',
+        notfound2: '**$notfound2**',
+        notfound3: '**${notfound3}**',
+        nested: '**${xxx${value}**',
+        nestedstr: '**${xxx${value}**',
+        nestedw: '**${xxx$value**',
+        nestedwstr: '**${xxx$value**',
+        atend: '**${atend'
+    };
+    assert.deepEqual(config.global, expect);
+
+    // should replace env
+    parser = new Parser({
+        env: {
+            value: 'variable',
+            brace: 'braceval',
+            another: 'key',
+            notexpanded: 'notexpanded',
+            atend: 'atend'
+        }
+    });
+    config = parser.parse(data);
+    expect = {
+        key: '**variable**',
+        brace: '**braceval**',
+        falty: '**${falty\ns}**',
+        mstring: '**${falty\ns}**',
+        another: '**key**',
+        notexpanded: '$notexpanded',
+        notexpanded2: '${notexpanded}',
+        notfound0: '**$notfound0**',
+        notfound1: '**${notfound1}**',
+        notfound2: '**$notfound2**',
+        notfound3: '**${notfound3}**',
+        nested: '**${xxxvariable**',
+        nestedstr: '**${xxxvariable**',
+        nestedw: '**${xxxvariable**',
+        nestedwstr: '**${xxxvariable**',
+        atend: '**${atend'
+    };
+    assert.deepEqual(config.global, expect);
+
+    // should call defaults for not found values
+    parser = new Parser({
+        env: {
+            value: 'variable',
+            brace: 'braceval',
+            another: 'key',
+            notexpanded: 'notexpanded',
+            atend: 'atend'
+        },
+        defaults: defaults
+    });
+    config = parser.parse(data);
+    expect = {
+        key: '**variable**',
+        brace: '**braceval**',
+        falty: '**${falty\ns}**',
+        mstring: '**${falty\ns}**',
+        another: '**key**',
+        notexpanded: '$notexpanded',
+        notexpanded2: '${notexpanded}',
+        notfound0: '****',
+        notfound1: '****',
+        notfound2: '****',
+        notfound3: '****',
+        nested: '**${xxxvariable**',
+        nestedstr: '**${xxxvariable**',
+        nestedw: '**${xxxvariable**',
+        nestedwstr: '**${xxxvariable**',
+        atend: '**${atend'
+    };
+    assert.deepEqual(config.global, expect);
+
+    // should do nothing if env is disabled
+    parser = new Parser({
+        env: false,
+        defaults: defaults
+    });
+    config = parser.parse(data);
+    expect = {
+        key: '**$value**',
+        brace: '**${brace}**',
+        falty: '**${falty\ns}**',
+        mstring: '**${falty\ns}**',
+        another: '**${another}**',
+        notexpanded: '$notexpanded',
+        notexpanded2: '${notexpanded}',
+        notfound0: '**$notfound0**',
+        notfound1: '**${notfound1}**',
+        notfound2: '**$notfound2**',
+        notfound3: '**${notfound3}**',
+        nested: '**${xxx${value}**',
+        nestedstr: '**${xxx${value}**',
+        nestedw: '**${xxx$value**',
+        nestedwstr: '**${xxx$value**',
+        atend: '**${atend'
+    };
+    assert.deepEqual(config.global, expect);
+
+    function defaults(variable) {
+        return '';
+    }
+};
+
+exports.testValueEsacpeChar = function testValueEsacpeChar() {
+    var parser = new Parser(),
+        data = "key = val\\ue\nanother = va\\$lue",
+        config = parser.parse(data),
+        expect = {
+            key: 'value',
+            another: 'va$lue'
+        };
+    assert.deepEqual(config.global, expect);
+
+    parser = new Parser({
+        escapeValueChar: false
+    });
+    config = parser.parse(data);
+    expect = {
+        key: 'val\\ue',
+        another: 'va\\$lue'
+    };
+    assert.deepEqual(config.global, expect);
+
+    parser = new Parser({
+        env: false,
+        escapeValueChar: false
+    });
+    config = parser.parse(data);
+    expect = {
+        key: 'val\\ue',
+        another: 'va\\$lue'
+    };
+    assert.deepEqual(config.global, expect);
+};
+
+exports.testMissingCoverage = function testMissingCoverage() {
+    var parser = new Parser(),
+        data = [
+            "key = ''",
+            "another = ''''''",
+            "empty ="
+        ].join('\n'),
+        config = parser.parse(data),
+        expect = {
+            key: '',
+            another: '',
+            empty: ''
+        };
+    assert.deepEqual(config.global, expect);
 };
 
 exports.testDefault = function testDefault() {
