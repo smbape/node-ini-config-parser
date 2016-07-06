@@ -49,3 +49,4 @@
 LICENSE text
 Makefile text
 package.json text eol=lf
+test/*.ini text eol=lf

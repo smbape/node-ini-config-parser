@@ -50,8 +50,8 @@ UNICODE_REG = /^\\u(?:([0-9a-fA-F]{4,5})|\{([0-9a-fA-F]{1,5})\})/g
 
 class Parser
     constructor: (options = {})->
-        if has.call(options, 'env')
-            @env = options.env
+        @env = if has.call(options, 'env') then options.env else {}
+        @nativeType = if has.call(options, 'nativeType') then options.nativeType else true
 
         for prop in ['onComment', 'defaults']
             if has.call(options, prop) and 'function' is typeof options[prop]
@@ -90,21 +90,32 @@ class Parser
         # global section
         {global, sections} = config
         while not (section = @maybeSection()) and (keyValue = @maybeKeyValue())
-            [key, value] = keyValue
-            global[key] = value
+            [key, value, isArray] = keyValue
+            if isArray
+                global[key] or (global[key] = [])
+                global[key].push value
+            else
+                global[key] = value
 
         # sections
         if section
             sections[section] or (sections[section] = {})
             while newSection = @maybeSection()
+                # TODO: multiple section ignore, override, extend, throw
                 section = newSection
                 sections[section] or (sections[section] = {})
 
             while keyValue = @maybeKeyValue()
-                [key, value] = keyValue
-                sections[section][key] = value
+                # TODO: multiple key ignore, override, array, throw
+                [key, value, isArray] = keyValue
+                if isArray
+                    sections[section][key] or (sections[section][key] = [])
+                    sections[section][key].push value
+                else
+                    sections[section][key] = value
 
                 while newSection = @maybeSection()
+                    # TODO: multiple section ignore, override, extend, throw
                     section = newSection
                     sections[section] or (sections[section] = {})
 
@@ -203,6 +214,7 @@ class Parser
                         unicode = String.fromCodePoint(unicode)
                         res.push unicode
                     else
+                        # TODO: warn only
                         throw makeSynthaxError 'Invalid Unicode escape sequence', @pos, 'UNICODE'
                 else
                     # escape \\
@@ -319,6 +331,7 @@ class Parser
             if @maybe(symbol)
                 commentStart = @pos
                 if not @maybe(symbol, true)
+                    # TODO: warn only
                     throw makeExpectingError '[EOF]', symbol, @pos
                 if @onComment
                     @onComment @input.substring(commentStart, @pos - symbol.length), 'block-comment'
@@ -345,6 +358,7 @@ class Parser
                     str = @input.substring(strStart, strEnd)
                     return @coerceString str, symbol
 
+                # TODO: warn only
                 throw makeExpectingError match, symbol, @pos
 
         if symbol = @maybeRegExp(/['"]/g)
@@ -357,7 +371,8 @@ class Parser
                 strEnd = match.index + 1
                 str = @input.substring(strStart, strEnd)
                 return @coerceString str, symbol
-            
+
+            # TODO: warn only
             throw makeExpectingError match, symbol, @pos
 
         return
@@ -387,13 +402,20 @@ class Parser
         if symbol = @maybeRegExp(@equalOrLineCommentRegSymbol, all)
             # inline comment
             if symbol in @lineCommentSymbol
+                # TODO: warn only
                 throw makeExpectingError symbol, @equalSymbol, @pos
 
             if not key
                 keyEnd = @pos - symbol.length
                 key = @input.substring(keyStart, keyEnd).trim()
+                keyLen = key.length
+                if keyLen > 1 and key[keyLen - 2] is '[' and key[keyLen - 1] is ']'
+                    # TODO: optional
+                    isArray = true
+                    key = key.substring(0, keyLen - 2)
 
             if key is ''
+                # TODO: warn only
                 throw makeSynthaxError 'Empty key', @pos, 'KEY'
 
         else
@@ -409,6 +431,7 @@ class Parser
                 if @maybeRegExp(/[\r\n]/g)
                     --@pos
                 else
+                    # TODO: warn only
                     throw makeExpectingError @input[@pos], '[EOF]', @pos
         else
             valueStart = @pos
@@ -417,18 +440,23 @@ class Parser
             value = @input.substring(valueStart, valueEnd).trim()
             @pos = match.index
 
-            switch value
-                when 'true'
-                    value = true
-                when 'false'
-                    value = false
-                else
-                    if isNumeric value
-                        value = parseFloat(value)
-                    else
-                        value = @coerceValue value
+            # TODO: JSON parse {...}
 
-        return [key, value]
+            if @nativeType
+                switch value
+                    when 'true'
+                        value = true
+                    when 'false'
+                        value = false
+                    else
+                        if isNumeric value
+                            value = parseFloat(value)
+                        else
+                            value = @coerceValue value
+            else
+                value = @coerceValue value
+
+        return [key, value, isArray]
 
     maybeSection: ->
         @eatAllSpacesAndComment()
@@ -450,10 +478,12 @@ class Parser
                     section = @input.substring(sectionStart, sectionEnd).trim()
 
                 if section is ''
+                    # TODO: warn only
                     throw makeSynthaxError 'Empty section', @pos, 'SECTION'
 
                 return section
 
+            # TODO: warn only
             throw makeExpectingError @input[@pos], ']', @pos
 
 module.exports = Parser

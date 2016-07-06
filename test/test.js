@@ -47,7 +47,7 @@ exports.testDefault = function testDefault() {
     assert.deepEqual(config, expect);
 };
 
-exports.testCoerce = function testCoerce() {
+ exports.testCoerce = function testCoerce() {
     process.env.HOST = '127.0.0.1';
     process.env.PORT = '3000';
     var parse = IniConfigParser(),
@@ -92,11 +92,12 @@ exports.testCoerce = function testCoerce() {
     assert.deepEqual(config, expect);
 };
 
-exports.testExtended = function testExtended() {
-    var fs = require('fs'),
-        data = fs.readFileSync(__dirname + '/comment.ini', 'utf-8'),
-        FSM = require('../src/Parser'),
-        comments = [
+var fs = require('fs'),
+    data = fs.readFileSync(__dirname + '/comment.ini', 'utf-8'),
+    Parser = require('../src/Parser');
+
+ exports.testExtended = function testExtended() {
+    var comments = [
             ['line-comment', 'comment'],
             ['line-comment', 'comment'],
             ['line-comment', 'comment'],
@@ -193,12 +194,14 @@ exports.testExtended = function testExtended() {
                     'env2': 'VAL0',
                     'env3': 'VAL0',
                     'text0': 'a value with VAL0 env',
+                    'zr': ['deedee'],
+                    'ar': ['one', 'three']
                 }
             }
         },
         config;
 
-    var fsm = new FSM({
+    var fsm = new Parser({
         env: {
             VAR0: 'VAL0',
         },
@@ -209,8 +212,8 @@ exports.testExtended = function testExtended() {
     });
 
     config = fsm.parse(data);
-    // assert.strictEqual(comments.length, 0);
-    // assert.deepEqual(config, expect);
+    assert.strictEqual(comments.length, 0);
+    assert.deepEqual(config, expect);
 
     // todo: test with new line ${}
 

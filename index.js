@@ -1,5 +1,16 @@
+require('coffee-script').register();
 var fs = require('fs'),
-    ini = require('ini');
+    Parser = require('./src/Parser'),
+    ini = new Parser({
+        nativeType: false
+    });
+
+var hasProp = {}.hasOwnProperty;
+
+function isObject(value) {
+    var type = typeof value;
+    return type === 'function' || (value && type === 'object');
+}
 
 function extend(dst, src) {
     if (null === dst || 'object' !== typeof dst || null === src || 'object' !== typeof src) {
@@ -9,6 +20,22 @@ function extend(dst, src) {
     for (var key in src) {
         dst[key] = src[key];
     }
+
+    return dst;
+}
+
+function defaults(dst, src) {
+    if (null === dst || 'object' !== typeof dst || null === src || 'object' !== typeof src) {
+        return dst;
+    }
+
+    for (var key in src) {
+        if (!hasProp.call(dst, key)) {
+            dst[key] = src[key];
+        }
+    }
+
+    return dst;
 }
 
 function parseFlat(config, coerce) {
@@ -34,7 +61,7 @@ function parseFlat(config, coerce) {
                 next[property] = value;
                 break;
             }
-            if (!next.hasOwnProperty(property)) {
+            if (!hasProp.call(next, property)) {
                 next[property] = {};
             }
             next = next[property];
@@ -45,8 +72,9 @@ function parseFlat(config, coerce) {
 }
 
 function parse(filePath, coerce) {
-    var child, configs, index, parent, section, sections, _len;
-    configs = ini.parse(fs.readFileSync(filePath, 'utf-8'));
+    var child, config, configs, index, parent, section, sections, _len;
+    config = ini.parse(fs.readFileSync(filePath, 'utf-8'));
+    configs = config.sections;
 
     for (section in configs) {
         if (!/\s*:\s*/.test(section)) {
@@ -57,7 +85,7 @@ function parse(filePath, coerce) {
         configs[child] = {};
         for (index = 1, _len = sections.length; index < _len; index++) {
             parent = sections[index];
-            if (!configs.hasOwnProperty(parent)) {
+            if (!hasProp.call(configs, parent)) {
                 continue;
             }
             extend(configs[child], configs[parent]);
@@ -67,17 +95,12 @@ function parse(filePath, coerce) {
     }
 
     for (section in configs) {
-        configs[section] = parseFlat(configs[section], coerce);
+        configs[section] = parseFlat(defaults(configs[section], config.global), coerce);
     }
 
-    return configs;
-}
+    config.global = parseFlat(config.global, coerce);
 
-function isObject(value) {
-    // Avoid a V8 JIT bug in Chrome 19-20.
-    // See https://code.google.com/p/v8/issues/detail?id=2291 for more details.
-    var type = typeof value;
-    return type == 'function' || (value && type == 'object') || false;
+    return configs;
 }
 
 function parser(registry) {
@@ -109,7 +132,7 @@ function parser(registry) {
             if (registry.has(variable)) {
                 return registry.get(variable);
             }
-            if (process.env.hasOwnProperty(variable)) {
+            if (hasProp.call(process.env, variable)) {
                 return process.env[variable];
             }
             return '';
