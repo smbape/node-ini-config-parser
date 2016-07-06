@@ -78,8 +78,98 @@ class Parser
         @equalOrLineCommentRegSymbol = new RegExp(@equalSymbolEscaped.join('|') + '|' + @lineCommentSymbolEscaped.join('|'), 'g')
         @lineCommentOrNewLineRegSymbol = new RegExp(@lineCommentSymbolEscaped.join('|') + '|[\\r\\n]|$', 'g')
 
+    parse: (@input)->
+        @len = @input.length
+        @pos = 0
+        config = {global: {}, sections: {}}
+        @config(config)
+        @mustEnd()
+        config
+
+    config: (config)->
+        # global section
+        {global, sections} = config
+        while not (section = @maybeSection()) and (keyValue = @maybeKeyValue())
+            [key, value] = keyValue
+            global[key] = value
+
+        # sections
+        if section
+            sections[section] or (sections[section] = {})
+            while newSection = @maybeSection()
+                section = newSection
+                sections[section] or (sections[section] = {})
+
+            while keyValue = @maybeKeyValue()
+                [key, value] = keyValue
+                sections[section][key] = value
+
+                while newSection = @maybeSection()
+                    section = newSection
+                    sections[section] or (sections[section] = {})
+
+        return config
+
     escapeReg: (str)->
         str.replace specialReg, '\\$1'
+
+    coerceValue: (str)->
+        lasIndex = 0
+        re = /\\(.)|\$(\w+)|(\$\{)|(\})/g
+        res = []
+        while match = re.exec(str)
+            [__, escaped, variable, _keyStart, _keyEnd] = match
+            if escaped
+                res.push escaped
+                lastIndex = re.lastIndex
+
+            else if variable
+                # env expansion
+                # $\w+
+                res.push str.substring(lastIndex, match.index)
+
+                if has.call @env, variable
+                    variable = @env[variable]
+                else if @defaults
+                    variable = @defaults variable
+                else
+                    variable = '$' + variable
+
+                res.push variable
+                lastIndex = re.lastIndex
+
+            else if _keyEnd and keyStart
+                # env expansion
+                # ${.+}
+                variable = str.substring(keyStart, match.index)
+
+                if has.call @env, variable
+                    variable = @env[variable]
+                else if @defaults
+                    variable = @defaults variable
+                else
+                    variable = '$' + variable
+
+                res.push variable
+                lastIndex = re.lastIndex
+                keyStart = null
+
+            else if _keyStart
+                if not keyStart
+                    keyStart = re.lastIndex
+                    res.push str.substring(lastIndex, match.index)
+                    lastIndex = match.index
+
+            else if keyStart and lf
+                keyStart = null
+
+        if lastIndex
+            if lastIndex < str.length
+                res.push str.substring(lastIndex)
+
+            return res.join('')
+
+        return str
 
     coerceString: (str, symbol)->
         lasIndex = 0
@@ -168,14 +258,6 @@ class Parser
             return res.join('')
 
         return str
-
-    parse: (@input)->
-        @len = @input.length
-        @pos = 0
-        config = {global: {}, sections: {}}
-        @config(config)
-        @mustEnd()
-        config
 
     maybe: (symbol, all)->
         if all
@@ -290,30 +372,6 @@ class Parser
             continue
         return
 
-    config: (config)->
-        # global section
-        {global, sections} = config
-        while not (section = @maybeSection()) and (keyValue = @maybeKeyValue())
-            [key, value] = keyValue
-            global[key] = value
-
-        # sections
-        if section
-            sections[section] or (sections[section] = {})
-            while newSection = @maybeSection()
-                section = newSection
-                sections[section] or (sections[section] = {})
-
-            while keyValue = @maybeKeyValue()
-                [key, value] = keyValue
-                sections[section][key] = value
-
-                while newSection = @maybeSection()
-                    section = newSection
-                    sections[section] or (sections[section] = {})
-
-        return config
-
     maybeKeyValue: ->
         @eatAllSpacesAndComment()
         if @pos >= @len
@@ -367,6 +425,8 @@ class Parser
                 else
                     if isNumeric value
                         value = parseFloat(value)
+                    else
+                        value = @coerceValue value
 
         return [key, value]
 
