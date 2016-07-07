@@ -1,10 +1,46 @@
-ini-config-parser
-=======
+# ini-config-parser
 
-Parse ini file with nested config overriding made easier (experimental)
+Parse ini file with nested config overriding made easier
+
+According to [INI file acticle](https://en.wikipedia.org/wiki/INI_file) on Wikipedia, there are many implementation on ini file parser.
+This is an attempt to create a customizable ini parser
+
+## Usage
+
+### parse(string, [object])
+
+Parse an ini text with these options
+
+```coffeescript
+defaultOptions =
+    env: process.env # used for variable extension
+    blockComment: [';;;', '###'] # used to delimit block comment. Set to false if you don't want block comment
+    lineComment: [';', '#'] # used to delimit line comment. Set to false if you don't want line comment
+    assign: [':', '='] # used to set assign sign
+    nativeType: true # will transform boolean and numbers into native type when not quoted
+    dotKey: true # a.b.c = value will be parse as '{a: {b: {c: value}}}' instead of ['a.b.c'] = value
+    inherit: true # enable section inheritance. [a: b : c : ...]. similar to _.defaults(a, b, c)
+    array: true # parse key[] = value as {key: [value]} instead of {'key[]': 'value'}
+    string: true # parse 'key' as a javascript string. i.e '\t\r\n\v\f\uhhhh\u{hhhhh}'
+    mstring: true # enable multiline strings
+    merge: true # return config as merge of global + sections
+    escapeCharKey: true # escap \ in key
+    escapeCharValue: true # escap \ in value and expand env
+    emptyValue: '' # empty value
+    ignoreMissingAssign: true # allow keys without assign token 
+    ignoreInvalidStringKey: false # "tata" y = toto => {'"tata" y': 'toto'}
+    ignoreCase: false # all keys and values are lower case
+```
+
+## Examples
 
 config.ini
+
 ```ini
+key = value
+array[] = g0
+array[] = g1
+
 [production]
 server.port = $PORT
 server.host = $HOST
@@ -19,101 +55,351 @@ redis.port = 6379
 smtp.server = 127.0.0.1
 smtp.port = 587
 client.routes.defaults.language = fr
+array[] = item0
+array[] = item1
+'strkey' = 'strvalue'
+'''mstrkey''' = '''mstrvalue'''
 ```
 
 ```javascript
-var IniConfigParser = require('sm-ini-config-parser');
-var assert = require('assert');
+var IniConfigParser = require('ini-config-parser'),
+    Parser = IniConfigParser.Parser;
 
-var config = IniConfigParser.parse(__dirname + '/config.ini'),
-    expect = {
-        production: {
-            server: {
-                port: '$PORT',
-                host: '$HOST'
-            },
-            redis: {
-                host: 'x.x.x.x',
-                port: '7468',
-                db: '1',
-                ttl: '3600'
-            }
+var file = __dirname + '/config.ini',
+    data = fs.readFileSync(file).toString(),
+    config, expect;
+
+config = IniConfigParser.parse(data, {
+    env: {
+        HOST: '127.0.0.1',
+        PORT: '3000'
+    }
+});
+
+expect = {
+    key: 'value',
+    array: ['g0', 'g1'],
+    production: {
+        key: 'value',
+        server: {
+            port: '3000',
+            host: '127.0.0.1'
         },
-        development: {
-            server: {
-                port: '$PORT',
-                host: '$HOST'
-            },
-            redis: {
-                host: 'localhost',
-                port: '6379',
-                db: '1',
-                ttl: '3600'
-            },
-            smtp: {
-                server: '127.0.0.1',
-                port: '587'
-            },
-            client: {
-                routes: {
-                    defaults: {
-                        language: 'fr'
-                    }
+        redis: {
+            host: 'x.x.x.x',
+            port: 7468,
+            db: 1,
+            ttl: 3600
+        },
+        array: ['g0', 'g1']
+    },
+    development: {
+        key: 'value',
+        server: {
+            port: '3000',
+            host: '127.0.0.1'
+        },
+        redis: {
+            host: 'localhost',
+            port: 6379,
+            db: 1,
+            ttl: 3600
+        },
+        smtp: {
+            server: '127.0.0.1',
+            port: 587
+        },
+        client: {
+            routes: {
+                defaults: {
+                    language: 'fr'
                 }
             }
-        }
-    };
+        },
+        array: ['item0', 'item1'],
+        strkey: 'strvalue',
+        mstrkey: 'mstrvalue'
+    }
+};
 
+assert.deepEqual(config, expect);
+
+config = IniConfigParser.parseFile(file, {
+    env: {
+        HOST: '127.0.0.1',
+        PORT: '3000'
+    }
+});
 assert.deepEqual(config, expect);
 ```
 
-```javascript
-var IniConfigParser = require('sm-ini-config-parser');
-var assert = require('assert');
+## Seperate global and sections
 
-process.env.HOST = '127.0.0.1';
-process.env.PORT = '3000';
-var parse = IniConfigParser(),
-    config = parse(__dirname + '/config.ini'),
-    expect = {
-        development: {
-            server: {
-                port: '3000',
-                host: '127.0.0.1'
-            },
-            redis: {
-                host: 'localhost',
-                port: 6379,
-                db: 1,
-                ttl: 3600
-            },
-            smtp: {
-                server: '127.0.0.1',
-                port: 587
-            },
-            client: {
-                routes: {
-                    defaults: {
-                        language: 'fr'
-                    }
-                }
-            }
-        },
-        production: {
-            server: {
-                port: '3000',
-                host: '127.0.0.1'
-            },
-            redis: {
-                host: 'x.x.x.x',
-                port: 7468,
-                db: 1,
-                ttl: 3600
+```javascript
+var Parser = require('ini-config-parser').Parser;
+var parser = new Parser();
+config = parser.parse(data);
+
+assert.deepEqual(config.global, {
+    key: 'value',
+    array: ['g0', 'g1']
+});
+
+// by default, all sections inherit global properties
+assert.deepEqual(config.sections.production, {
+    key: 'value',
+    array: ['g0', 'g1'],
+    server: {
+        port: '3000',
+        host: '127.0.0.1'
+    },
+    redis: {
+        host: 'x.x.x.x',
+        port: 7468,
+        db: 1,
+        ttl: 3600
+    }
+});
+
+// however global properties can be overrided in sections
+assert.deepEqual(config.sections.development, {
+    key: 'value',
+    server: {
+        port: '3000',
+        host: '127.0.0.1'
+    },
+    redis: {
+        host: 'localhost',
+        port: 6379,
+        db: 1,
+        ttl: 3600
+    },
+    smtp: {
+        server: '127.0.0.1',
+        port: 587
+    },
+    client: {
+        routes: {
+            defaults: {
+                language: 'fr'
             }
         }
-    };
-assert.deepEqual(config, expect);
+    },
+    array: ['item0', 'item1'],
+    strkey: 'strvalue',
+    mstrkey: 'mstrvalue'
+});
 
+```
+
+# Options
+
+## env
+
+```ini
+type: object|false
+default: process.env
+```
+
+Used for variable extension. Set to false to disable variable extension
+
+```javascript
+assert.deepEqual(IniConfigParser.parse([
+    "user = $user",
+    "password = ${password}",
+    "missing = $missing",
+    "unknown = ${unknown}"
+].join('\n'), {
+    env: {
+        user: 'name',
+        password: 'password'
+    }
+}), {
+    user: 'name',
+    password: 'password',
+    missing: '$missing',
+    unknown: '${unknown}'
+});
+
+assert.deepEqual(IniConfigParser.parse([
+    "user = $user",
+    "password = ${password}",
+    "missing = $missing",
+    "unknown = ${unknown}"
+].join('\n'), {
+    env: false
+}), {
+    user: '$user',
+    password: '${password}',
+    missing: '$missing',
+    unknown: '${unknown}'
+});
+```
+
+## onEnvNotFound(variable, str)
+
+```ini
+type: function
+```
+
+Called when variable is not found
+
+```javascript
+function onEnvNotFound(variable, str) {
+    return '==' + variable + '[' + str + ']' + '==';
+}
+
+assert.deepEqual(IniConfigParser.parse([
+    "user = $user",
+    "password = ${password}",
+    "missing = $missing",
+    "unknown = ${unknown}"
+].join('\n'), {
+    env: {
+        user: 'name',
+        password: 'password'
+    },
+    onEnvNotFound
+}), {
+    user: 'name',
+    password: 'password',
+    missing: '==missing[$missing]==',
+    unknown: '==unknown[${unknown}]=='
+});
+
+// disabling false also disable onEnvNotFound
+assert.deepEqual(IniConfigParser.parse([
+    "user = $user",
+    "password = ${password}",
+    "missing = $missing",
+    "unknown = ${unknown}"
+].join('\n'), {
+    env: false,
+    onEnvNotFound
+}), {
+    user: '$user',
+    password: '${password}',
+    missing: '$missing',
+    unknown: '${unknown}'
+});
+```
+
+## blockComment
+
+```ini
+type: array|false
+default: [';;;', '###']
+```
+
+Used to delimit block comment. Set to false if you don't want block comment
+
+```javascript
+// ;;; and ### are the default block comment
+// ; and # are the default line comment
+assert.deepEqual(IniConfigParser.parse([
+    ";;;a comment",
+    "to ignore;;;",
+    "###a comment",
+    "to ignore###",
+    "user = name ### inline ###",
+    "password = password ;;; inline ;;;"
+].join('\n')), {
+    user: 'name',
+    password: 'password'
+});
+
+
+// ; and # are the default line comment
+assert.deepEqual(IniConfigParser.parse([
+    "***a comment",
+    "to ignore***",
+    "oui*** =",
+    "non***",
+    "###a comment",
+    "to ignore###",
+    "user = name *** inline ***",
+    "password = password ;;; inline ;;;"
+].join('\n'), {
+    blockComment: ['***']
+}), {
+    'to ignore': '',
+    oui: '',
+    user: 'name',
+    password: 'password'
+});
+
+// ; and # are the default line comment
+assert.deepEqual(IniConfigParser.parse([
+    "***a comment",
+    "to ignore***",
+    "oui*** =",
+    "non***",
+    "###a comment",
+    "to ignore###",
+    "user = name *** inline ***",
+    "password = password ;;; inline ;;;"
+].join('\n'), {
+    blockComment: false
+}), {
+    "***a comment": '',
+    "to ignore***": '',
+    "oui***": '',
+    "non***": '',
+    "to ignore": '',
+    "user": 'name *** inline ***',
+    "password": 'password'
+});
+```
+
+## lineComment
+
+```ini
+type: array|false
+default: [';', '#']
+```
+
+Used to delimit line comment. Set to false if you don't want line comment
+
+```javascript
+// ; and # are the default line comment
+assert.deepEqual(IniConfigParser.parse([
+    "user = name; inline",
+    "; a comment",
+    "# a comment",
+    "password = password # inline"
+].join('\n')), {
+    user: 'name',
+    password: 'password'
+});
+
+// # is still a line comment
+assert.deepEqual(IniConfigParser.parse([
+    "user = name; inline",
+    "; a comment",
+    "// a comment",
+    "password = password // inline"
+].join('\n'), {
+    lineComment: ['//']
+}), {
+    user: 'name; inline',
+    '; a comment': '',
+    password: 'password'
+});
+
+// ; and # are the default line comment
+assert.deepEqual(IniConfigParser.parse([
+    "user = name; inline",
+    "; a comment",
+    "# a comment",
+    "password = password # inline"
+].join('\n'), {
+    lineComment: false
+}), {
+    "user": "name; inline",
+    "; a comment": "",
+    "# a comment": "",
+    "password": "password # inline"
+});
 ```
 
 License

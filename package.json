@@ -8,8 +8,8 @@
   },
   "scripts": {
     "prepublish": "node scripts/prepublish.js",
-    "test": "node node_modules/mocha/bin/_mocha --full-trace --compilers coffee:coffee-script/register --require ./test/common.coffee ./test",
-    "test-cover": "node ./node_modules/istanbul/lib/cli.js cover --dir=./test/reports/coverage ./node_modules/mocha/bin/_mocha -- -O reportDir=./test/reports --full-trace --compilers coffee:coffee-script/register --require ./test/common.coffee ./test"
+    "test": "node node_modules/mocha/bin/_mocha ./test",
+    "test-cover": "node ./node_modules/istanbul/lib/cli.js cover --dir=./test/reports/coverage ./node_modules/mocha/bin/_mocha -- ./test"
   },
   "repository": {
     "type": "git",
@@ -32,6 +32,7 @@
     "istanbul": "^0.4.4",
     "mkdirp": "^0.5.1",
     "mocha": "^2.5.3",
+    "mochawesome": "^1.3.5",
     "nodeunit": "^0.9.1",
     "rimraf": "^2.5.3"
   }

@@ -6,6 +6,179 @@ var util = require('util'),
     IniConfigParser = require('../'),
     Parser = IniConfigParser.Parser;
 
+exports.testOptionEnv = function testOptionEnv() {
+    assert.deepEqual(IniConfigParser.parse([
+        "user = $user",
+        "password = ${password}",
+        "missing = $missing",
+        "unknown = ${unknown}"
+    ].join('\n'), {
+        env: {
+            user: 'name',
+            password: 'password'
+        }
+    }), {
+        user: 'name',
+        password: 'password',
+        missing: '$missing',
+        unknown: '${unknown}'
+    });
+
+    assert.deepEqual(IniConfigParser.parse([
+        "user = $user",
+        "password = ${password}",
+        "missing = $missing",
+        "unknown = ${unknown}"
+    ].join('\n'), {
+        env: false
+    }), {
+        user: '$user',
+        password: '${password}',
+        missing: '$missing',
+        unknown: '${unknown}'
+    });
+};
+
+exports.testOptionOnEnvNotFound = function testOptionOnEnvNotFound() {
+    function onEnvNotFound(variable, str) {
+        return '==' + variable + '[' + str + ']' + '==';
+    }
+
+    assert.deepEqual(IniConfigParser.parse([
+        "user = $user",
+        "password = ${password}",
+        "missing = $missing",
+        "unknown = ${unknown}"
+    ].join('\n'), {
+        env: {
+            user: 'name',
+            password: 'password'
+        },
+        onEnvNotFound: onEnvNotFound
+    }), {
+        user: 'name',
+        password: 'password',
+        missing: '==missing[$missing]==',
+        unknown: '==unknown[${unknown}]=='
+    });
+
+    // disabling false also disable onEnvNotFound
+    assert.deepEqual(IniConfigParser.parse([
+        "user = $user",
+        "password = ${password}",
+        "missing = $missing",
+        "unknown = ${unknown}"
+    ].join('\n'), {
+        env: false,
+        onEnvNotFound: onEnvNotFound
+    }), {
+        user: '$user',
+        password: '${password}',
+        missing: '$missing',
+        unknown: '${unknown}'
+    });
+};
+
+exports.testOptionBlockComment = function testOptionBlockComment() {
+    // ;;; and ### are the default block comment
+    // ; and # are the default line comment
+    assert.deepEqual(IniConfigParser.parse([
+        ";;;a comment",
+        "to ignore;;;",
+        "###a comment",
+        "to ignore###",
+        "user = name ### inline ###",
+        "password = password ;;; inline ;;;"
+    ].join('\n')), {
+        user: 'name',
+        password: 'password'
+    });
+
+
+    // ; and # are the default line comment
+    assert.deepEqual(IniConfigParser.parse([
+        "***a comment",
+        "to ignore***",
+        "oui*** =",
+        "non***",
+        "###a comment",
+        "to ignore###",
+        "user = name *** inline ***",
+        "password = password ;;; inline ;;;"
+    ].join('\n'), {
+        blockComment: ['***']
+    }), {
+        'to ignore': '',
+        oui: '',
+        user: 'name',
+        password: 'password'
+    });
+
+    // ; and # are the default line comment
+    assert.deepEqual(IniConfigParser.parse([
+        "***a comment",
+        "to ignore***",
+        "oui*** =",
+        "non***",
+        "###a comment",
+        "to ignore###",
+        "user = name *** inline ***",
+        "password = password ;;; inline ;;;"
+    ].join('\n'), {
+        blockComment: false
+    }), {
+        "***a comment": '',
+        "to ignore***": '',
+        "oui***": '',
+        "non***": '',
+        "to ignore": '',
+        "user": 'name *** inline ***',
+        "password": 'password'
+    });
+};
+
+exports.testOptionLineComment = function testOptionLineComment() {
+    // ; and # are the default line comment
+    assert.deepEqual(IniConfigParser.parse([
+        "user = name; inline",
+        "; a comment",
+        "# a comment",
+        "password = password # inline"
+    ].join('\n')), {
+        user: 'name',
+        password: 'password'
+    });
+
+    // # is still a line comment
+    assert.deepEqual(IniConfigParser.parse([
+        "user = name; inline",
+        "; a comment",
+        "// a comment",
+        "password = password // inline"
+    ].join('\n'), {
+        lineComment: ['//']
+    }), {
+        user: 'name; inline',
+        '; a comment': '',
+        password: 'password'
+    });
+
+    // ; and # are the default line comment
+    assert.deepEqual(IniConfigParser.parse([
+        "user = name; inline",
+        "; a comment",
+        "# a comment",
+        "password = password # inline"
+    ].join('\n'), {
+        lineComment: false
+    }), {
+        "user": "name; inline",
+        "; a comment": "",
+        "# a comment": "",
+        "password": "password # inline"
+    });
+};
+
 exports.testExport = function testExport() {
     var file = __dirname + '/config.ini',
         data = fs.readFileSync(file).toString(),
@@ -20,6 +193,7 @@ exports.testExport = function testExport() {
             array: ['g0', 'g1'],
             production: {
                 key: 'value',
+                array: ['g0', 'g1'],
                 server: {
                     port: '3000',
                     host: '127.0.0.1'
@@ -29,8 +203,7 @@ exports.testExport = function testExport() {
                     port: 7468,
                     db: 1,
                     ttl: 3600
-                },
-                array: ['g0', 'g1']
+                }
             },
             development: {
                 key: 'value',
@@ -366,7 +539,7 @@ exports.testEnv = function testEnv() {
     };
     assert.deepEqual(config.global, expect);
 
-    // should call defaults for not found values
+    // should call onEnvNotFound for not found values
     parser = new Parser({
         env: {
             value: 'variable',
@@ -375,7 +548,7 @@ exports.testEnv = function testEnv() {
             notexpanded: 'notexpanded',
             atend: 'atend'
         },
-        defaults: defaults
+        onEnvNotFound: onEnvNotFound
     });
     config = parser.parse(data);
     expect = {
@@ -401,7 +574,7 @@ exports.testEnv = function testEnv() {
     // should do nothing if env is disabled
     parser = new Parser({
         env: false,
-        defaults: defaults
+        onEnvNotFound: onEnvNotFound
     });
     config = parser.parse(data);
     expect = {
@@ -424,41 +597,45 @@ exports.testEnv = function testEnv() {
     };
     assert.deepEqual(config.global, expect);
 
-    function defaults(variable) {
+    function onEnvNotFound(variable) {
         return '';
     }
 };
 
-exports.testValueEsacpeChar = function testValueEsacpeChar() {
-    var parser = new Parser(),
-        data = "key = val\\ue\nanother = va\\$lue",
-        config = parser.parse(data),
-        expect = {
-            key: 'value',
-            another: 'va$lue'
-        };
-    assert.deepEqual(config.global, expect);
+exports.testEsacpeChar = function testEsacpeChar() {
+    var data = "key = val\\ue\nanother = va\\$lue";
 
-    parser = new Parser({
-        escapeValueChar: false
+    assert.deepEqual(IniConfigParser.parse(data), {
+        key: 'value',
+        another: 'va$lue'
     });
-    config = parser.parse(data);
-    expect = {
+
+    assert.deepEqual(IniConfigParser.parse(data, {
+        escapeCharValue: false
+    }), {
         key: 'val\\ue',
         another: 'va\\$lue'
-    };
-    assert.deepEqual(config.global, expect);
+    });
 
-    parser = new Parser({
+    assert.deepEqual(IniConfigParser.parse(data, {
         env: false,
-        escapeValueChar: false
-    });
-    config = parser.parse(data);
-    expect = {
+        escapeCharValue: false
+    }), {
         key: 'val\\ue',
         another: 'va\\$lue'
-    };
-    assert.deepEqual(config.global, expect);
+    });
+
+    assert.deepEqual(IniConfigParser.parse("x\\y\\z = value", {
+        escapeCharKey: true
+    }), {
+        xyz: 'value'
+    });
+
+    assert.deepEqual(IniConfigParser.parse("x\\y\\z = value", {
+        escapeCharKey: false
+    }), {
+        'x\\y\\z': 'value'
+    });
 };
 
 exports.testMissingCoverage = function testMissingCoverage() {
@@ -500,6 +677,16 @@ exports.testMissingCoverage = function testMissingCoverage() {
     }), {
         '"tata" y': 'toto',
         '"tata""y"': 'toto'
+    });
+
+    assert.deepEqual(IniConfigParser.parse([
+        'Key = TOTO',
+        'aNOTHER = toto',
+    ].join('\n'), {
+        ignoreCase: true
+    }), {
+        'key': 'toto',
+        'another': 'toto'
     });
 };
 

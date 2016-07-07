@@ -1,0 +1,5 @@
+--full-trace
+--compilers coffee:coffee-script/register
+--require ./test/common.coffee
+--reporter mochawesome
+-O reportDir=test/reports

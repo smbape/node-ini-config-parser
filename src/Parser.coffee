@@ -1,4 +1,5 @@
 has = {}.hasOwnProperty
+unshift = [].unshift
 
 makeExpectingError = (actual, expected, pos, code = 'EXPECTED')->
     msg = "Excpecting #{expected}. Instead get #{actual}."
@@ -76,11 +77,13 @@ defaultOptions =
     array: true # parse key[] = value as {key: [value]} instead of {'key[]': 'value'}
     string: true # parse 'key' as a javascript string. i.e '\t\r\n\v\f\uhhhh\u{hhhhh}'
     mstring: true # enable multiline strings
-    merge: false # return config as merge of global + sections
-    escapeValueChar: true # escap \ in value
+    escapeCharKey: true # escap \ in key
+    escapeCharValue: true # escap \ in value and expand env
     emptyValue: '' # empty value
-    ignoreMissingAssign: true
-    ignoreInvalidStringKey: false
+    ignoreMissingAssign: true # allow keys without assign token 
+    ignoreInvalidStringKey: false # "tata" y = toto => {'"tata" y': 'toto'}
+    ignoreCase: false # all keys and values are lower case
+    merge: false # return config as merge of global + sections
 
 class Parser
     constructor: (options = {})->
@@ -89,7 +92,7 @@ class Parser
         for prop of defaultOptions
             @options[prop] = if has.call(options, prop) then options[prop] else defaultOptions[prop]
 
-        for prop in ['onComment', 'defaults']
+        for prop in ['onComment', 'onEnvNotFound']
             if has.call(options, prop) and 'function' is typeof options[prop]
                 @[prop] = options[prop]
 
@@ -109,12 +112,21 @@ class Parser
         for symbol, i in @options.assign
             @assignSymbolEscaped[i] = @escapeReg(symbol)
 
+        @commentOrNewLineRegSymbol = ['[\\r\\n]', '$']
+        @assignOrLfOrCommentRegSymbol = ['[\\r\\n]']
+
         if @lineCommentSymbolEscaped
-            @assignOrLfOrLineCommentRegSymbol = new RegExp(@assignSymbolEscaped.join('|') + '|' + @lineCommentSymbolEscaped.join('|') + '|[\\r\\n]', 'g')
-            @lineCommentOrNewLineRegSymbol = new RegExp(@lineCommentSymbolEscaped.join('|') + '|[\\r\\n]|$', 'g')
-        else
-            @assignOrLfOrLineCommentRegSymbol = new RegExp(@assignSymbolEscaped.join('|') + '|[\\r\\n]', 'g')
-            @lineCommentOrNewLineRegSymbol = new RegExp('[\\r\\n]|$', 'g')
+            unshift.apply @commentOrNewLineRegSymbol, @lineCommentSymbolEscaped
+            unshift.apply @assignOrLfOrCommentRegSymbol, @lineCommentSymbolEscaped
+
+        if @blockCommentSymbolEscaped
+            unshift.apply @commentOrNewLineRegSymbol, @blockCommentSymbolEscaped
+            unshift.apply @assignOrLfOrCommentRegSymbol, @blockCommentSymbolEscaped
+
+        unshift.apply @assignOrLfOrCommentRegSymbol, @assignSymbolEscaped
+
+        @commentOrNewLineRegSymbol = new RegExp @commentOrNewLineRegSymbol.join('|'), 'mg'
+        @assignOrLfOrCommentRegSymbol = new RegExp @assignOrLfOrCommentRegSymbol.join('|'), 'mg'
 
     parse: (@input)->
         @len = @input.length
@@ -174,7 +186,7 @@ class Parser
 
     coerceValue: (str)->
         lasIndex = 0
-        if @options.escapeValueChar
+        if @options.escapeCharValue
             if @options.env
                 re = /\\(.)|\$(\w+)|(\$\{)|(\})/g
             else
@@ -200,8 +212,8 @@ class Parser
 
                 if has.call @options.env, variable
                     variable = @options.env[variable]
-                else if @defaults
-                    variable = @defaults variable
+                else if @onEnvNotFound
+                    variable = @onEnvNotFound variable, __
                 else
                     variable = __
 
@@ -215,8 +227,8 @@ class Parser
 
                 if has.call @options.env, variable
                     variable = @options.env[variable]
-                else if @defaults
-                    variable = @defaults variable
+                else if @onEnvNotFound
+                    variable = @onEnvNotFound variable, str.substring(lastIndex, re.lastIndex)
                 else
                     variable = str.substring(lastIndex, re.lastIndex)
 
@@ -293,8 +305,8 @@ class Parser
 
                 if has.call @options.env, variable
                     variable = @options.env[variable]
-                else if @defaults
-                    variable = @defaults variable
+                else if @onEnvNotFound
+                    variable = @onEnvNotFound variable, __
                 else
                     variable = __
 
@@ -308,8 +320,8 @@ class Parser
 
                 if has.call @options.env, variable
                     variable = @options.env[variable]
-                else if @defaults
-                    variable = @defaults variable
+                else if @onEnvNotFound
+                    variable = @onEnvNotFound variable, str.substring(lastIndex, re.lastIndex)
                 else
                     variable = str.substring(lastIndex, re.lastIndex)
 
@@ -407,6 +419,7 @@ class Parser
                 if @maybe(symbol)
                     commentStart = @pos
                     match = @maybeRegExp /\r?\n|\r|$/g, true
+                    @pos = match.index
                     if @onComment
                         @onComment @input.substring(commentStart, match.index), 'line-comment'
                     return true
@@ -467,26 +480,35 @@ class Parser
         if key = @maybeString()
             @eatSpaceAndComment()
 
-            if not (symbol = @maybeRegExp(@assignOrLfOrLineCommentRegSymbol))
+            if not (symbol = @maybeRegExp(@assignOrLfOrCommentRegSymbol))
                 key = null
                 @pos = keyStart
                 if not @options.ignoreInvalidStringKey
                     throw makeSynthaxError 'Invalid string', @pos, 'INVALID_STRING'
 
-        if symbol or (match = @maybeRegExp(@assignOrLfOrLineCommentRegSymbol, true))
+        if symbol or (match = @maybeRegExp(@assignOrLfOrCommentRegSymbol, true))
             if match
                 symbol = match[0]
 
-            if @options.lineComment and symbol in @options.lineComment
-                if not @options.ignoreMissingAssign
+            keyEnd = @pos - symbol.length
+
+            if (@options.lineComment and symbol in @options.lineComment) or (@options.blockComment and symbol in @options.blockComment)
+                if @options.ignoreMissingAssign
+                    @pos = match.index
+                else
                     throw makeExpectingError symbol, @options.assign, @pos
 
-            else if /[\r\n]/.test(symbol) and not @options.ignoreMissingAssign
-                throw makeExpectingError symbol, @options.assign, @pos
+            else if /[\r\n]/.test(symbol)
+                if @options.ignoreMissingAssign
+                    @pos = match.index
+                else
+                    throw makeExpectingError symbol, @options.assign, @pos
 
             if not key
-                keyEnd = @pos - symbol.length
                 key = @input.substring(keyStart, keyEnd).trim()
+
+                if @options.escapeCharKey
+                    key = key.replace /\\(.)/g, '$1'
 
                 if @options.array
                     keyLen = key.length
@@ -501,6 +523,9 @@ class Parser
         else
             throw makeExpectingError symbol, @options.assign, @pos
 
+        if @options.ignoreCase
+            key = key.toLowerCase()
+
         @eatSpaceAndComment()
         if @pos >= @len
             return [key, @options.emptyValue, isArray]
@@ -513,12 +538,17 @@ class Parser
                 else
                     # TODO: ignoreInvalidStringValue
                     throw makeExpectingError @input[@pos], '[EOF]', @pos
+            if @options.ignoreCase
+                value = value.toLowerCase()
         else
             valueStart = @pos
-            match = @maybeRegExp @lineCommentOrNewLineRegSymbol, true
+            match = @maybeRegExp @commentOrNewLineRegSymbol, true
             valueEnd = match.index
             value = @input.substring(valueStart, valueEnd).trim()
             @pos = match.index
+
+            if @options.ignoreCase
+                value = value.toLowerCase()
 
             # TODO: JSON parse {...}
 
@@ -560,6 +590,8 @@ class Parser
                 if section is ''
                     # TODO: ignoreEmptySection
                     throw makeSynthaxError 'Empty section', @pos, 'SECTION'
+
+                # TODO: check nothing after section
 
                 return section
 
