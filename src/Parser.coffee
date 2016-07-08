@@ -1,15 +1,11 @@
 has = {}.hasOwnProperty
 unshift = [].unshift
+deepExtend = require('deep-extend')
 
 makeExpectingError = (actual, expected, pos, code = 'EXPECTED')->
     msg = "Excpecting #{expected}. Instead get #{actual}."
     err = makeSynthaxError msg, pos, code
     err
-
-# makeUnExpectingError = (actual, pos, code = 'UNEXPECTED')->
-#     msg = "Unexpected token #{actual}."
-#     err = makeSynthaxError msg, pos, code
-#     err
 
 makeSynthaxError = (msg, pos, code)->
     err = makeError msg, code, pos, SyntaxError
@@ -27,25 +23,6 @@ makeError = (msg, code, pos, clazz = Error)->
 isNumeric = (obj)->
     !Array.isArray( obj ) and (obj - parseFloat( obj ) + 1) >= 0
 
-# isObject = (value)->
-#     type = typeof value
-#     type is 'function' or value and type is 'object'
-
-extend = (dst, src)->
-    if null is dst or 'object' isnt typeof dst or null is src or 'object' isnt typeof src
-        return dst
-    for key of src
-        dst[key] = src[key]
-    dst
-
-defaults = (dst, src)->
-    if null is dst or 'object' isnt typeof dst or null is src or 'object' isnt typeof src
-        return dst
-    for key of src
-        if !has.call(dst, key)
-            dst[key] = src[key]
-    dst
-
 specialReg = new RegExp '([' + '\\/^$.|?*+()[]{}'.split('').join('\\') + '])', 'g'
 
 specialCharMap =
@@ -55,7 +32,6 @@ specialCharMap =
     '\\v': '\v'
     '\\f': '\f'
     '\\b': '\b'
-    '\\0': '\0'
 
 quoteRegMap =
     "'": /[^\r\n\\](')|[\r\n]/g
@@ -67,21 +43,22 @@ OCTAL_REG = /^\\([0-7]{1,3})/g
 UNICODE_REG = /^\\u(?:([0-9a-fA-F]{4,5})|\{([0-9a-fA-F]{1,5})\})/g
 
 defaultOptions =
-    env: process.env # used for variable extension
-    blockComment: [';;;', '###'] # used to delimit block comment. Set to false if you don't want block comment
-    lineComment: [';', '#'] # used to delimit line comment. Set to false if you don't want line comment
-    assign: [':', '='] # used to set assign sign
-    nativeType: true # will transform boolean and numbers into native type when not quoted
-    dotKey: true # a.b.c = value will be parse as '{a: {b: {c: value}}}' instead of ['a.b.c'] = value
-    inherit: true # enable section inheritance. [a: b : c : ...]. similar to _.defaults(a, b, c)
-    array: true # parse key[] = value as {key: [value]} instead of {'key[]': 'value'}
-    string: true # parse 'key' as a javascript string. i.e '\t\r\n\v\f\uhhhh\u{hhhhh}'
-    mstring: true # enable multiline strings
-    escapeCharKey: true # escap \ in key
-    escapeCharValue: true # escap \ in value and expand env
+    env: process.env # Used for variable extension. Set to false to disable variable extension
+    blockComment: [';;;', '###'] # Used to delimit block comment. Set to false if you don't want block comment
+    lineComment: [';', '#'] # Used to delimit line comment. Set to false if you don't want line comment
+    assign: [':', '='] # Define assign symbols
+    nativeType: true # Transform boolean and numbers into native type unless quoted
+    dotKey: true # Parse `a.b.c = value` as `{a: {b: {c: value}}}` instead of `{'a.b.c': value}` unless quoted
+    inherit: true # Enable global and section inheritance. .i.e `[a: b : c : ...]` similar to `_.defaultsDeep(a, b, c)`
+    array: true # Parse key[] = value as {key: [value]} instead of {'key[]': 'value'} unless quoted
+    string: true # Parse 'key' as a javascript string. i.e decode `\t \r \n \v \f \uhhhh \u{hhhhh} \<octal>`
+    mstring: true # Enable multiline strings
+    ignoreInvalidStringKey: true # `"tata" y = toto` => `{'"tata" y': 'toto'}`
+    ignoreInvalidStringValue: true # `toto = "tata"y` => `{toto: '"tata"y'}`
     emptyValue: '' # empty value
+    escapeCharKey: true # escape \ in not quoted key
+    escapeCharValue: true # escape \ in value and expand env in not quoted value
     ignoreMissingAssign: true # allow keys without assign token 
-    ignoreInvalidStringKey: false # "tata" y = toto => {'"tata" y': 'toto'}
     ignoreCase: false # all keys and values are lower case
     merge: false # return config as merge of global + sections
 
@@ -138,11 +115,8 @@ class Parser
         if @options.inherit
             config = @inherit config
 
-        if @options.dotKey
-            config = @dotKey config
-
         if @options.merge
-            config = defaults config.sections, config.global
+            config = deepExtend config.global, config.sections
 
         config
 
@@ -150,12 +124,7 @@ class Parser
         # global section
         {global, sections} = config
         while not (section = @maybeSection()) and (keyValue = @expectEofOrKeyValue())
-            [key, value, isArray] = keyValue
-            if isArray
-                global[key] or (global[key] = [])
-                global[key].push value
-            else
-                global[key] = value
+            @set global, keyValue
 
         # sections
         if section
@@ -167,12 +136,7 @@ class Parser
 
             while keyValue = @expectEofOrKeyValue()
                 # TODO: multiple key ignore, override, array, throw
-                [key, value, isArray] = keyValue
-                if isArray
-                    sections[section][key] or (sections[section][key] = [])
-                    sections[section][key].push value
-                else
-                    sections[section][key] = value
+                @set sections[section], keyValue
 
                 while newSection = @maybeSection()
                     # TODO: multiple section ignore, override, extend, throw
@@ -180,6 +144,29 @@ class Parser
                     sections[section] or (sections[section] = {})
 
         return config
+
+    set: (obj, [key, value, isArray, isStringKey])->
+        if not isStringKey and @options.dotKey
+            properties = key.split('.')
+            len = properties.length
+            if len > 1
+                for i in [0...(len - 1)]
+                    key = properties[i]
+                    if key is ''
+                        # TODO: ignoreEmptyKey
+                        throw makeSynthaxError 'Empty key', @pos, 'KEY'
+
+                    if not has.call(obj, key)
+                        obj[key] = {}
+
+                    obj = obj[key]
+                key = properties[len - 1]
+
+        if isArray
+            obj[key] or (obj[key] = [])
+            obj[key].push value
+        else
+            obj[key] = value
 
     escapeReg: (str)->
         str.replace specialReg, '\\$1'
@@ -426,7 +413,9 @@ class Parser
 
         return
 
-    maybeString: ->
+    maybeString: (type)->
+        backup = @pos
+
         if @options.mstring
             for symbol in ['"""', "'''"]
                 if @maybe(symbol)
@@ -440,8 +429,10 @@ class Parser
                         str = @input.substring(strStart, strEnd)
                         return @coerceString str, symbol
 
-                    # TODO: ignoreInvalidString
-                    throw makeExpectingError match, symbol, @pos
+                    if @options['ignoreInvalidString' + type]
+                        @pos = backup
+                    else
+                        throw makeExpectingError match, symbol, @pos
 
         if @options.string
             if symbol = @maybeRegExp(/['"]/g)
@@ -455,8 +446,10 @@ class Parser
                     str = @input.substring(strStart, strEnd)
                     return @coerceString str, symbol
 
-                # TODO: ignoreInvalidString
-                throw makeExpectingError match, symbol, @pos
+                if @options['ignoreInvalidString' + type]
+                    @pos = backup
+                else
+                    throw makeExpectingError match, symbol, @pos
 
         return
 
@@ -477,13 +470,15 @@ class Parser
 
         keyStart = @pos
 
-        if key = @maybeString()
+        if (key = @maybeString('Key')) or key is ''
+            isStringKey = true
             @eatSpaceAndComment()
 
             if not (symbol = @maybeRegExp(@assignOrLfOrCommentRegSymbol))
-                key = null
-                @pos = keyStart
-                if not @options.ignoreInvalidStringKey
+                if @options.ignoreInvalidStringKey
+                    key = null
+                    @pos = keyStart
+                else
                     throw makeSynthaxError 'Invalid string', @pos, 'INVALID_STRING'
 
         if symbol or (match = @maybeRegExp(@assignOrLfOrCommentRegSymbol, true))
@@ -491,8 +486,15 @@ class Parser
                 symbol = match[0]
 
             keyEnd = @pos - symbol.length
+            hasBlockComment = false
 
-            if (@options.lineComment and symbol in @options.lineComment) or (@options.blockComment and symbol in @options.blockComment)
+            if (@options.lineComment and symbol in @options.lineComment)
+                hasComment = true
+            else if(@options.blockComment and symbol in @options.blockComment)
+                hasComment = true
+                hasBlockComment = true
+
+            if hasComment
                 if @options.ignoreMissingAssign
                     @pos = match.index
                 else
@@ -505,7 +507,44 @@ class Parser
                     throw makeExpectingError symbol, @options.assign, @pos
 
             if not key
-                key = @input.substring(keyStart, keyEnd).trim()
+                key = @input.substring(keyStart, keyEnd)
+                if hasBlockComment
+                    keyStart = null
+                    key = [key]
+
+                    while (match = @maybeRegExp @assignOrLfOrCommentRegSymbol, true)
+                        symbol = match[0]
+                        lastIndex = @pos
+                        @pos = match.index
+
+                        if keyStart and keyStart isnt @pos
+                            keyEnd = @pos
+                            key.push @input.substring(keyStart, keyEnd)
+                            keyStart = keyEnd
+
+                        if symbol in @options.assign
+                            hasAssign = true
+                            @pos = lastIndex
+                            break
+
+                        if not @eatComment()
+                            break
+
+                        keyStart = @pos
+
+                    if not hasAssign
+                        if not @options.ignoreMissingAssign
+                            throw makeExpectingError symbol, @options.assign, @pos
+
+                        else if match = @maybeRegExp /[\r\n]|$/g, true
+                            @pos = match.index
+                            keyEnd = @pos
+                            if keyStart isnt keyEnd
+                                key.push @input.substring(keyStart, keyEnd)
+
+                    key = key.join('')
+
+                key = key.trim()
 
                 if @options.escapeCharKey
                     key = key.replace /\\(.)/g, '$1'
@@ -528,24 +567,59 @@ class Parser
 
         @eatSpaceAndComment()
         if @pos >= @len
-            return [key, @options.emptyValue, isArray]
+            return [key, @options.emptyValue, isArray, isStringKey]
 
-        if value = @maybeString()
+        backup = @pos
+
+        if (value = @maybeString('Value')) or value is ''
             @eatSpaceAndComment()
             if @pos < @len
+                valueStart = @pos
                 if @maybeRegExp(/[\r\n]/g)
-                    --@pos
+                    @pos = valueStart
+                else if @options.ignoreInvalidStringValue
+                    @pos = backup
+                    value = null
                 else
-                    # TODO: ignoreInvalidStringValue
                     throw makeExpectingError @input[@pos], '[EOF]', @pos
-            if @options.ignoreCase
+
+            if value and @options.ignoreCase
                 value = value.toLowerCase()
-        else
+
+        if not value and value isnt ''
             valueStart = @pos
             match = @maybeRegExp @commentOrNewLineRegSymbol, true
             valueEnd = match.index
-            value = @input.substring(valueStart, valueEnd).trim()
+            value = @input.substring(valueStart, valueEnd)
             @pos = match.index
+            symbol = match[0]
+
+            if @options.blockComment and symbol in @options.blockComment
+                valueStart = null
+                value = [value]
+
+                while (match = @maybeRegExp @commentOrNewLineRegSymbol, true)
+                    @pos = match.index
+
+                    if valueStart and valueStart isnt @pos
+                        valueEnd = @pos
+                        value.push @input.substring(valueStart, valueEnd)
+                        valueStart = valueEnd
+
+                    if not @eatComment()
+                        break
+
+                    valueStart = @pos
+
+                if match = @maybeRegExp /[\r\n]|$/g, true
+                    @pos = match.index
+                    valueEnd = @pos
+                    if valueStart isnt valueEnd
+                        value.push @input.substring(valueStart, valueEnd)
+
+                value = value.join('')
+
+            value = value.trim()
 
             if @options.ignoreCase
                 value = value.toLowerCase()
@@ -566,7 +640,7 @@ class Parser
             else
                 value = @coerceValue value
 
-        return [key, value, isArray]
+        return [key, value, isArray, isStringKey]
 
     maybeSection: ->
         @eatAllSpacesAndComment()
@@ -598,35 +672,35 @@ class Parser
             # TODO: ignoreNotEndedSection
             throw makeExpectingError @input[@pos], ']', @pos
 
-    parseFlat: (config)->
-        parsedConfig = {}
-        for key, value of config
-            properties = key.split('.')
-            _len = properties.length
-            if _len < 2
-                parsedConfig[key] = value
-                continue
-            next = parsedConfig
+    dotKey: (key, value)->
+        properties = key.split('.')
+        len = properties.length
+        if len < 2
+            return [key, value]
 
-            for i in [0..._len] by 1
-                property = properties[i]
+        key = properties[0]
+        obj = {}
+        next = obj
 
-                if i is _len - 1
-                    next[property] = value
-                    break
+        for i in [1...len] by 1
+            prop = properties[i]
 
-                if !has.call(next, property)
-                    next[property] = {}
+            if i is len - 1
+                next[prop] = value
+                break
 
-                next = next[property]
+            if not has.call(next, prop)
+                next[prop] = {}
 
-        parsedConfig
+            next = next[prop]
+
+        return [key, obj]
 
     inherit: (config)->
         configs = config.sections
 
         for section of configs
-            defaults configs[section], config.global
+            configs[section] = deepExtend {}, config.global, configs[section]
 
             if !/\s*:\s*/.test(section)
                 continue
@@ -640,20 +714,10 @@ class Parser
                 if !has.call(configs, parent)
                     continue
 
-                extend configs[child], configs[parent]
+                configs[child] = deepExtend {}, configs[parent], configs[child]
 
-            extend configs[child], configs[section]
+            deepExtend configs[child], configs[section]
             delete configs[section]
-
-        config
-
-    dotKey: (config)->
-        configs = config.sections
-
-        config.global = @parseFlat config.global
-
-        for section of configs
-            configs[section] = @parseFlat configs[section]
 
         config
 
