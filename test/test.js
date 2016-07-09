@@ -486,70 +486,133 @@ exports.testOptionMString = function testOptionMString() {
     });
 };
 
-exports.testExport = function testExport() {
-    var file = __dirname + '/config.ini',
-        data = fs.readFileSync(file).toString(),
-        config = IniConfigParser.parse(data, {
-            env: {
-                HOST: '127.0.0.1',
-                PORT: '3000'
-            }
-        }),
-        expect = {
-            key: 'value',
-            array: ['g0', 'g1'],
-            production: {
-                key: 'value',
-                array: ['g0', 'g1'],
-                server: {
-                    port: '3000',
-                    host: '127.0.0.1'
-                },
-                redis: {
-                    host: 'x.x.x.x',
-                    port: 7468,
-                    db: 1,
-                    ttl: 3600
-                }
-            },
-            development: {
-                key: 'value',
-                server: {
-                    port: '3000',
-                    host: '127.0.0.1'
-                },
-                redis: {
-                    host: 'localhost',
-                    port: 6379,
-                    db: 1,
-                    ttl: 3600
-                },
-                smtp: {
-                    server: '127.0.0.1',
-                    port: 587
-                },
-                client: {
-                    routes: {
-                        defaults: {
-                            language: 'fr'
-                        }
-                    }
-                },
-                array: ['item0', 'item1'],
-                strkey: 'strvalue',
-                mstrkey: 'mstrvalue'
-            }
-        };
-
-    assert.deepEqual(config, expect);
-
-    config = IniConfigParser.parseFile(file, {
-        env: {
-            HOST: '127.0.0.1',
-            PORT: '3000'
-        }
+exports.testOptionIgnoreInvalidStringKey = function testOptionIgnoreInvalidStringKey() {
+    assert.deepEqual(IniConfigParser.parse([
+        '"tata" y = toto',
+        '"""tata"""y = toto'
+    ].join('\n')), {
+        '"tata" y': 'toto',
+        '"""tata"""y': 'toto'
     });
-    assert.deepEqual(config, expect);
+
+    assert.throws(function() {
+        IniConfigParser.parse('"tata" y = toto', {
+            ignoreInvalidStringKey: false
+        });
+    });
+
+    assert.throws(function() {
+        IniConfigParser.parse('"""tata"""y = toto', {
+            ignoreInvalidStringKey: false
+        });
+    });
+};
+
+exports.testOptionIgnoreInvalidStringValue = function testOptionIgnoreInvalidStringValue() {
+    assert.deepEqual(IniConfigParser.parse([
+        'toto = "tata"y',
+        'titi = """tata"""y'
+    ].join('\n')), {
+        'toto': '"tata"y',
+        'titi': '"""tata"""y'
+    });
+
+    assert.throws(function() {
+        IniConfigParser.parse('toto = "tata"y', {
+            ignoreInvalidStringValue: false
+        });
+    });
+
+    assert.throws(function() {
+        IniConfigParser.parse('titi = """tata"""y', {
+            ignoreInvalidStringValue: false
+        });
+    });
+};
+
+exports.testOptionEmptyValue = function testOptionEmptyValue() {
+    assert.deepEqual(IniConfigParser.parse([
+        'host ='
+    ].join('\n'), {
+        emptyValue: 'value'
+    }), {
+        'host': 'value'
+    });
+};
+
+exports.testOptionEscapeCharKey = function testOptionEscapeCharKey() {
+    var data = 'ho\\st = 127.0.0.1';
+
+    assert.deepEqual(IniConfigParser.parse(data), {
+        'host': '127.0.0.1'
+    });
+
+    assert.deepEqual(IniConfigParser.parse(data, {
+        escapeCharKey: false
+    }), {
+        'ho\\st': '127.0.0.1'
+    });
+};
+
+exports.testOptionEscapeCharValue = function testOptionEscapeCharValue() {
+    var data = [
+        'host = 127.0\\.0.1',
+        'port = $port',
+        'eport = \\$port'
+    ].join('\n');
+
+    assert.deepEqual(IniConfigParser.parse(data, {
+        env: {
+            port: 1234
+        }
+    }), {
+        'host': '127.0.0.1',
+        'port': 1234,
+        'eport': '$port'
+    });
+
+    assert.deepEqual(IniConfigParser.parse(data, {
+        env: {
+            port: 1234
+        },
+        escapeCharValue: false
+    }), {
+        'host': '127.0\\.0.1',
+        'port': 1234,
+        'eport': '\\1234'
+    });
+};
+
+exports.testOptionIgnoreMissingAssign = function testOptionIgnoreMissingAssign() {
+    var data = [
+        'host = ',
+        'port'
+    ].join('\n');
+
+    assert.deepEqual(IniConfigParser.parse(data), {
+        'host': '',
+        'port': ''
+    });
+
+    assert.throws(function() {
+        IniConfigParser.parse(data, {
+            ignoreMissingAssign: false
+        });
+    });
+};
+
+exports.testOptionIgnoreCase = function testOptionIgnoreCase() {
+    assert.deepEqual(IniConfigParser.parse([
+        'host = HOST',
+        'PORT = 5678',
+        '"SHAFT" = "5678"'
+    ].join('\n'), {
+        ignoreCase: true
+    }), {
+        'host': 'host',
+        'port': 5678,
+        'shaft': '5678'
+    });
 };
 
 exports.testOptionEnv2 = function testOptionEnv2() {
@@ -692,92 +755,87 @@ exports.testOptionEnv2 = function testOptionEnv2() {
     }
 };
 
-exports.testEsacpeChar = function testEsacpeChar() {
-    var data = "key = val\\ue\nanother = va\\$lue";
-
-    assert.deepEqual(IniConfigParser.parse(data), {
-        key: 'value',
-        another: 'va$lue'
-    });
-
-    assert.deepEqual(IniConfigParser.parse(data, {
-        escapeCharValue: false
-    }), {
-        key: 'val\\ue',
-        another: 'va\\$lue'
-    });
-
-    assert.deepEqual(IniConfigParser.parse(data, {
+exports.testMissingCoverage = function testMissingCoverage() {
+    assert.deepEqual(IniConfigParser.parse([
+        'host = 127.0\\.0.1',
+        'port = $port',
+        'eport = \\$port'
+    ].join('\n'), {
         env: false,
         escapeCharValue: false
     }), {
-        key: 'val\\ue',
-        another: 'va\\$lue'
-    });
-
-    assert.deepEqual(IniConfigParser.parse("x\\y\\z = value", {
-        escapeCharKey: true
-    }), {
-        xyz: 'value'
-    });
-
-    assert.deepEqual(IniConfigParser.parse("x\\y\\z = value", {
-        escapeCharKey: false
-    }), {
-        'x\\y\\z': 'value'
-    });
-};
-
-exports.testMissingCoverage = function testMissingCoverage() {
-    var parser = new Parser(),
-        data = [
-            "key = ''",
-            "another = ''''''",
-            "empty ="
-        ].join('\n'),
-        config = parser.parse(data),
-        expect = {
-            key: '',
-            another: '',
-            empty: ''
-        };
-    assert.deepEqual(config.global, expect);
-
-    assert.throws(function() {
-        IniConfigParser.parse('toto', {
-            ignoreMissingAssign: false
-        });
-    });
-    assert.throws(function() {
-        IniConfigParser.parse('toto ; =', {
-            ignoreMissingAssign: false
-        });
-    });
-    assert.throws(function() {
-        IniConfigParser.parse('toto\ntata ; =', {
-            ignoreMissingAssign: false
-        });
+        'host': '127.0\\.0.1',
+        'port': '$port',
+        'eport': '\\$port'
     });
 
     assert.deepEqual(IniConfigParser.parse([
-        '"tata" y = toto',
-        '"tata""y" = toto',
+        "key = ''",
+        "another = ''''''",
+        "empty ="
+    ].join('\n'), {}), {
+        key: '',
+        another: '',
+        empty: ''
+    });
+
+    assert.deepEqual(IniConfigParser.parse([
+        '"tata',
+        '"""titi',
     ].join('\n'), {
         ignoreInvalidStringKey: true
     }), {
-        '"tata" y': 'toto',
-        '"tata""y"': 'toto'
+        '"tata': '',
+        '"""titi': ''
     });
 
-    assert.deepEqual(IniConfigParser.parse([
-        'Key = TOTO',
-        'aNOTHER = toto',
-    ].join('\n'), {
-        ignoreCase: true
-    }), {
-        'key': 'toto',
-        'another': 'toto'
+    assert.throws(function() {
+        IniConfigParser.parse([
+            'toto =',
+            'tata ; =',
+        ].join('\n'), {
+            ignoreMissingAssign: false
+        });
     });
+
+    assert.throws(function() {
+        IniConfigParser.parse([
+            'toto = ',
+            'tata ;;; = ;;; ',
+        ].join('\n'), {
+            ignoreMissingAssign: false
+        });
+    });
+
+    assert.throws(function() {
+        IniConfigParser.parse([
+            'toto',
+            'tata =',
+        ].join('\n'), {
+            ignoreMissingAssign: false
+        });
+    });
+
+    // assert.throws(function() {
+    //     IniConfigParser.parse('toto', {
+    //         ignoreMissingAssign: false
+    //     });
+    // });
+    // assert.throws(function() {
+    //     IniConfigParser.parse('toto ; =', {
+    //         ignoreMissingAssign: false
+    //     });
+    // });
+
+    // assert.deepEqual(IniConfigParser.parse([
+    //     'Key = TOTO',
+    //     'aNOTHER = toto',
+    // ].join('\n'), {
+    //     ignoreCase: true
+    // }), {
+    //     'key': 'toto',
+    //     'another': 'toto'
+    // });
 };
 
 exports.testDefault = function testDefault() {
@@ -934,6 +992,145 @@ exports.testDefault = function testDefault() {
     // assert.throws(function() {
     //     fsm.parse('toto = "tata""y"');
     // });
+};
+
+exports.testExample1 = function testExample1() {
+    var file = __dirname + '/config.ini',
+        data = fs.readFileSync(file).toString(),
+        config, expect;
+
+    config = IniConfigParser.parse(data, {
+        env: {
+            HOST: '127.0.0.1',
+            PORT: '3000'
+        }
+    });
+
+    expect = {
+        key: 'value',
+        array: ['g0', 'g1'],
+        production: {
+            key: 'value',
+            server: {
+                port: '3000',
+                host: '127.0.0.1'
+            },
+            redis: {
+                host: 'x.x.x.x',
+                port: 7468,
+                db: 1,
+                ttl: 3600
+            },
+            array: ['g0', 'g1']
+        },
+        development: {
+            key: 'value',
+            server: {
+                port: '3000',
+                host: '127.0.0.1'
+            },
+            redis: {
+                host: 'localhost',
+                port: 6379,
+                db: 1,
+                ttl: 3600
+            },
+            smtp: {
+                server: '127.0.0.1',
+                port: 587
+            },
+            client: {
+                routes: {
+                    defaults: {
+                        language: 'fr'
+                    }
+                }
+            },
+            array: ['item0', 'item1'],
+            strkey: 'strvalue',
+            mstrkey: 'mstrvalue'
+        }
+    };
+
+    assert.deepEqual(config, expect);
+
+    config = IniConfigParser.parseFile(file, {
+        env: {
+            HOST: '127.0.0.1',
+            PORT: '3000'
+        }
+    });
+    assert.deepEqual(config, expect);
+};
+
+exports.testExample2 = function testExample2() {
+    var file = __dirname + '/config.ini',
+        data = fs.readFileSync(file).toString();
+
+    var config = IniConfigParser.Parser({
+        env: {
+            HOST: '127.0.0.1',
+            PORT: '3000'
+        }
+    }).parse(data);
+
+    assert.deepEqual(config.global, {
+        key: 'value',
+        array: ['g0', 'g1']
+    });
+
+    // by default, all sections inherit global properties
+    assert.deepEqual(config.sections.production, {
+        key: 'value',
+        array: ['g0', 'g1'],
+        server: {
+            port: '3000',
+            host: '127.0.0.1'
+        },
+        redis: {
+            host: 'x.x.x.x',
+            port: 7468,
+            db: 1,
+            ttl: 3600
+        }
+    });
+
+    // however global properties can be overrided in sections
+    assert.deepEqual(config.sections.development, {
+        key: 'value',
+        server: {
+            port: '3000',
+            host: '127.0.0.1'
+        },
+        redis: {
+            host: 'localhost',
+            port: 6379,
+            db: 1,
+            ttl: 3600
+        },
+        smtp: {
+            server: '127.0.0.1',
+            port: 587
+        },
+        client: {
+            routes: {
+                defaults: {
+                    language: 'fr'
+                }
+            }
+        },
+        array: ['item0', 'item1'],
+        strkey: 'strvalue',
+        mstrkey: 'mstrvalue'
+    });
+
+    assert.deepEqual(IniConfigParser.parse(data, {
+        env: {
+            HOST: '127.0.0.1',
+            PORT: '3000'
+        },
+        merge: false
+    }), config);
 };
 
 describe(__filename.replace(/^(?:.+[\/\\])?([^.\/\\]+)(?:.[^.]+)?$/, '$1'), function() {

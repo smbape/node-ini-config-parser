@@ -43,6 +43,7 @@ OCTAL_REG = /^\\([0-7]{1,3})/g
 UNICODE_REG = /^\\u(?:([0-9a-fA-F]{4,5})|\{([0-9a-fA-F]{1,5})\})/g
 
 defaultOptions =
+    merge: false # Return config as merge of global + sections
     env: process.env # Used for variable extension. Set to false to disable variable extension
     blockComment: [';;;', '###'] # Used to delimit block comment. Set to false if you don't want block comment
     lineComment: [';', '#'] # Used to delimit line comment. Set to false if you don't want line comment
@@ -53,17 +54,19 @@ defaultOptions =
     array: true # Parse key[] = value as {key: [value]} instead of {'key[]': 'value'} unless quoted
     string: true # Parse 'key' as a javascript string. i.e decode `\t \r \n \v \f \uhhhh \u{hhhhh} \<octal>`
     mstring: true # Enable multiline strings
-    ignoreInvalidStringKey: true # `"tata" y = toto` => `{'"tata" y': 'toto'}`
+    ignoreInvalidStringKey: true # Parse `"tata" y = toto` => `{'"tata" y': 'toto'}` otherwise, throw an error
     ignoreInvalidStringValue: true # `toto = "tata"y` => `{toto: '"tata"y'}`
-    emptyValue: '' # empty value
-    escapeCharKey: true # escape \ in not quoted key
-    escapeCharValue: true # escape \ in value and expand env in not quoted value
-    ignoreMissingAssign: true # allow keys without assign token 
-    ignoreCase: false # all keys and values are lower case
-    merge: false # return config as merge of global + sections
+    emptyValue: '' # Empty value
+    escapeCharKey: true # Escape `\` in not quoted key
+    escapeCharValue: true # Escape `\` in value in not quoted value
+    ignoreMissingAssign: true # Allow keys without assign token
+    ignoreCase: false # All keys and values are lower case
 
 class Parser
     constructor: (options = {})->
+        if not (@ instanceof  Parser)
+            return new Parser(options)
+
         @options = {}
 
         for prop of defaultOptions
@@ -172,7 +175,7 @@ class Parser
         str.replace specialReg, '\\$1'
 
     coerceValue: (str)->
-        lasIndex = 0
+        lastIndex = 0
         if @options.escapeCharValue
             if @options.env
                 re = /\\(.)|\$(\w+)|(\$\{)|(\})/g
@@ -188,14 +191,14 @@ class Parser
             [__, escaped, variable, _keyStart, _keyEnd] = match
 
             if escaped
-                res.push str.substring(lastIndex, match.index)
+                res.push str.substring(lastIndex, match.index) if lastIndex isnt match.index
                 res.push escaped
                 lastIndex = re.lastIndex
 
             else if variable
                 # env expansion
                 # $\w+
-                res.push str.substring(lastIndex, match.index)
+                res.push str.substring(lastIndex, match.index) if lastIndex isnt match.index
 
                 if has.call @options.env, variable
                     variable = @options.env[variable]
@@ -225,12 +228,15 @@ class Parser
 
             else if _keyStart
                 keyStart = re.lastIndex
-                res.push str.substring(lastIndex, match.index)
+                res.push str.substring(lastIndex, match.index) if lastIndex isnt match.index
                 lastIndex = match.index
 
         if lastIndex
             if lastIndex < str.length
                 res.push str.substring(lastIndex)
+
+            if res.length is 1
+                return res[0]
 
             return res.join('')
 
@@ -253,7 +259,7 @@ class Parser
                     # bad substitution
                     keyStart = null
 
-                res.push str.substring(lastIndex, match.index)
+                res.push str.substring(lastIndex, match.index) if lastIndex isnt match.index
 
                 substr = str.substring(match.index, match.index + 7)
                 OCTAL_REG.lastIndex = 0
@@ -288,7 +294,7 @@ class Parser
 
                 # env expansion
                 # $\w+
-                res.push str.substring(lastIndex, match.index)
+                res.push str.substring(lastIndex, match.index) if lastIndex isnt match.index
 
                 if has.call @options.env, variable
                     variable = @options.env[variable]
@@ -318,7 +324,7 @@ class Parser
 
             else if _keyStart
                 keyStart = re.lastIndex
-                res.push str.substring(lastIndex, match.index)
+                res.push str.substring(lastIndex, match.index) if lastIndex isnt match.index
                 lastIndex = match.index
 
             else if keyStart and lf
@@ -481,86 +487,87 @@ class Parser
                 else
                     throw makeSynthaxError 'Invalid string', @pos, 'INVALID_STRING'
 
-        if symbol or (match = @maybeRegExp(@assignOrLfOrCommentRegSymbol, true))
+        if not symbol
+            match = @maybeRegExp(@assignOrLfOrCommentRegSymbol, true)
             if match
                 symbol = match[0]
+                keyEnd = match.index
+            else if @options.ignoreMissingAssign
+                symbol = ''
+                keyEnd = @pos = @len
+            else
+                throw makeExpectingError symbol, @options.assign, @pos
 
-            keyEnd = @pos - symbol.length
-            hasBlockComment = false
+        hasBlockComment = false
 
-            if (@options.lineComment and symbol in @options.lineComment)
-                hasComment = true
-            else if(@options.blockComment and symbol in @options.blockComment)
-                hasComment = true
-                hasBlockComment = true
+        if (@options.lineComment and symbol in @options.lineComment)
+            if @options.ignoreMissingAssign
+                @pos = match.index
+            else
+                throw makeExpectingError symbol, @options.assign, @pos
 
-            if hasComment
-                if @options.ignoreMissingAssign
+        else if (@options.blockComment and symbol in @options.blockComment)
+            hasBlockComment = true
+            @pos = match.index
+
+        else if /[\r\n]/.test(symbol)
+            if @options.ignoreMissingAssign
+                @pos = match.index
+            else
+                throw makeExpectingError symbol, @options.assign, @pos
+
+        if not key and key isnt ''
+            key = @input.substring(keyStart, keyEnd)
+            if hasBlockComment
+                keyStart = null
+                key = [key]
+
+                while (match = @maybeRegExp @assignOrLfOrCommentRegSymbol, true)
+                    symbol = match[0]
+                    lastIndex = @pos
                     @pos = match.index
-                else
-                    throw makeExpectingError symbol, @options.assign, @pos
 
-            else if /[\r\n]/.test(symbol)
-                if @options.ignoreMissingAssign
-                    @pos = match.index
-                else
-                    throw makeExpectingError symbol, @options.assign, @pos
+                    if keyStart and keyStart isnt @pos
+                        keyEnd = @pos
+                        key.push @input.substring(keyStart, keyEnd)
+                        keyStart = keyEnd
 
-            if not key
-                key = @input.substring(keyStart, keyEnd)
-                if hasBlockComment
-                    keyStart = null
-                    key = [key]
+                    if symbol in @options.assign
+                        hasAssign = true
+                        @pos = lastIndex
+                        break
 
-                    while (match = @maybeRegExp @assignOrLfOrCommentRegSymbol, true)
-                        symbol = match[0]
-                        lastIndex = @pos
+                    if not @eatComment()
+                        break
+
+                    keyStart = @pos
+
+                if not hasAssign
+                    if not @options.ignoreMissingAssign
+                        throw makeExpectingError symbol, @options.assign, @pos
+
+                    else if match = @maybeRegExp /[\r\n]|$/g, true
                         @pos = match.index
-
-                        if keyStart and keyStart isnt @pos
-                            keyEnd = @pos
+                        keyEnd = @pos
+                        if keyStart isnt keyEnd
                             key.push @input.substring(keyStart, keyEnd)
-                            keyStart = keyEnd
 
-                        if symbol in @options.assign
-                            hasAssign = true
-                            @pos = lastIndex
-                            break
+                key = key.join('')
 
-                        if not @eatComment()
-                            break
+            key = key.trim()
 
-                        keyStart = @pos
+            if @options.escapeCharKey
+                key = key.replace /\\(.)/g, '$1'
 
-                    if not hasAssign
-                        if not @options.ignoreMissingAssign
-                            throw makeExpectingError symbol, @options.assign, @pos
-
-                        else if match = @maybeRegExp /[\r\n]|$/g, true
-                            @pos = match.index
-                            keyEnd = @pos
-                            if keyStart isnt keyEnd
-                                key.push @input.substring(keyStart, keyEnd)
-
-                    key = key.join('')
-
-                key = key.trim()
-
-                if @options.escapeCharKey
-                    key = key.replace /\\(.)/g, '$1'
-
-                if @options.array
-                    keyLen = key.length
-                    if keyLen > 1 and key[keyLen - 2] is '[' and key[keyLen - 1] is ']'
-                        isArray = true
-                        key = key.substring(0, keyLen - 2)
+            if @options.array
+                keyLen = key.length
+                if keyLen > 1 and key[keyLen - 2] is '[' and key[keyLen - 1] is ']'
+                    isArray = true
+                    key = key.substring(0, keyLen - 2)
 
             if key is ''
                 # TODO: ignoreEmptyKey
                 throw makeSynthaxError 'Empty key', @pos, 'KEY'
-
-        else
-            throw makeExpectingError symbol, @options.assign, @pos
 
         if @options.ignoreCase
             key = key.toLowerCase()
@@ -671,30 +678,6 @@ class Parser
 
             # TODO: ignoreNotEndedSection
             throw makeExpectingError @input[@pos], ']', @pos
-
-    dotKey: (key, value)->
-        properties = key.split('.')
-        len = properties.length
-        if len < 2
-            return [key, value]
-
-        key = properties[0]
-        obj = {}
-        next = obj
-
-        for i in [1...len] by 1
-            prop = properties[i]
-
-            if i is len - 1
-                next[prop] = value
-                break
-
-            if not has.call(next, prop)
-                next[prop] = {}
-
-            next = next[prop]
-
-        return [key, obj]
 
     inherit: (config)->
         configs = config.sections

@@ -7,12 +7,13 @@ This is an attempt to create a customizable ini parser
 
 ## Usage
 
-### parse(string, [object])
+### IniConfigParser.parse(string, [object])
 
-Parse an ini text with these options
+Parse an ini text with these default options
 
 ```coffeescript
 defaultOptions =
+    merge: true # Return config as merge of global + sections
     env: process.env # Used for variable extension. Set to false to disable variable extension
     blockComment: [';;;', '###'] # Used to delimit block comment. Set to false if you don't want block comment
     lineComment: [';', '#'] # Used to delimit line comment. Set to false if you don't want line comment
@@ -23,14 +24,39 @@ defaultOptions =
     array: true # Parse key[] = value as {key: [value]} instead of {'key[]': 'value'} unless quoted
     string: true # Parse 'key' as a javascript string. i.e decode `\t \r \n \v \f \uhhhh \u{hhhhh} \<octal>`
     mstring: true # Enable multiline strings
-    ignoreInvalidStringKey: true # `"tata" y = toto` => `{'"tata" y': 'toto'}`
+    ignoreInvalidStringKey: true # Parse `"tata" y = toto` => `{'"tata" y': 'toto'}` otherwise, throw an error
     ignoreInvalidStringValue: true # `toto = "tata"y` => `{toto: '"tata"y'}`
-    emptyValue: '' # empty value
-    escapeCharKey: true # escape \ in not quoted key
-    escapeCharValue: true # escape \ in value and expand env in not quoted value
-    ignoreMissingAssign: true # allow keys without assign token 
-    ignoreCase: false # all keys and values are lower case
-    merge: true # return config as merge of global + sections
+    emptyValue: '' # Empty value
+    escapeCharKey: true # Escape `\` in not quoted key
+    escapeCharValue: true # Escape `\` in value in not quoted value
+    ignoreMissingAssign: true # Allow keys without assign token
+    ignoreCase: false # All keys and values are lower case
+```
+
+### IniConfigParser.Parser([object]).parse(string)
+
+Parse an ini text with these default options
+
+```coffeescript
+defaultOptions =
+    merge: false # Return config as merge of global + sections
+    env: process.env # Used for variable extension. Set to false to disable variable extension
+    blockComment: [';;;', '###'] # Used to delimit block comment. Set to false if you don't want block comment
+    lineComment: [';', '#'] # Used to delimit line comment. Set to false if you don't want line comment
+    assign: [':', '='] # Define assign symbols
+    nativeType: true # Transform boolean and numbers into native type unless quoted
+    dotKey: true # Parse `a.b.c = value` as `{a: {b: {c: value}}}` instead of `{'a.b.c': value}` unless quoted
+    inherit: true # Enable global and section inheritance. .i.e `[a: b : c : ...]` similar to `_.defaultsDeep(a, b, c)`
+    array: true # Parse key[] = value as {key: [value]} instead of {'key[]': 'value'} unless quoted
+    string: true # Parse 'key' as a javascript string. i.e decode `\t \r \n \v \f \uhhhh \u{hhhhh} \<octal>`
+    mstring: true # Enable multiline strings
+    ignoreInvalidStringKey: true # Parse `"tata" y = toto` => `{'"tata" y': 'toto'}` otherwise, throw an error
+    ignoreInvalidStringValue: true # `toto = "tata"y` => `{toto: '"tata"y'}`
+    emptyValue: '' # Empty value
+    escapeCharKey: true # Escape `\` in not quoted key
+    escapeCharValue: true # Escape `\` in value in not quoted value
+    ignoreMissingAssign: true # Allow keys without assign token
+    ignoreCase: false # All keys and values are lower case
 ```
 
 ## Examples
@@ -137,9 +163,17 @@ assert.deepEqual(config, expect);
 ## Seperate global and sections
 
 ```javascript
-var Parser = require('ini-config-parser').Parser;
-var parser = new Parser();
-var config = parser.parse(data);
+var IniConfigParser = require('ini-config-parser');
+
+var file = __dirname + '/config.ini',
+    data = fs.readFileSync(file).toString();
+
+var config = IniConfigParser.Parser({
+    env: {
+        HOST: '127.0.0.1',
+        PORT: '3000'
+    }
+}).parse(data);
 
 assert.deepEqual(config.global, {
     key: 'value',
@@ -191,6 +225,13 @@ assert.deepEqual(config.sections.development, {
     mstrkey: 'mstrvalue'
 });
 
+assert.deepEqual(IniConfigParser.parse(data, {
+    env: {
+        HOST: '127.0.0.1',
+        PORT: '3000'
+    },
+    merge: false
+}), config);
 ```
 
 # Options
@@ -884,6 +925,222 @@ assert.deepEqual(IniConfigParser.parse(data, {
     '111': '',
     'text': '"""',
     'somettext withnnew line and unicodes uu0424u and uu{201}u and octal o111o': ''
+});
+```
+
+## ignoreInvalidStringKey
+
+```ini
+type: boolean
+default: true
+```
+
+Parse `"tata" y = toto` => `{'"tata" y': 'toto'}` otherwise, throw an error
+
+```javascript
+assert.deepEqual(IniConfigParser.parse([
+    '"tata" y = toto',
+    '"""tata"""y = toto'
+].join('\n')), {
+    '"tata" y': 'toto',
+    '"""tata"""y': 'toto'
+});
+
+assert.throws(function() {
+    IniConfigParser.parse('"tata" y = toto', {
+        ignoreInvalidStringKey: false
+    });
+});
+
+assert.throws(function() {
+    IniConfigParser.parse('"""tata"""y = toto', {
+        ignoreInvalidStringKey: false
+    });
+});
+```
+
+## ignoreInvalidStringValue
+
+```ini
+type: boolean
+default: true
+```
+
+Parse `"tata" y = toto` => `{'"tata" y': 'toto'}` otherwise, throw an error
+
+```javascript
+assert.deepEqual(IniConfigParser.parse([
+    'toto = "tata"y',
+    'titi = """tata"""y'
+].join('\n')), {
+    'toto': '"tata"y',
+    'titi': '"""tata"""y'
+});
+
+assert.throws(function() {
+    IniConfigParser.parse('toto = "tata"y', {
+        ignoreInvalidStringValue: false
+    });
+});
+
+assert.throws(function() {
+    IniConfigParser.parse('titi = """tata"""y', {
+        ignoreInvalidStringValue: false
+    });
+});
+```
+## emptyValue
+
+```ini
+type: boolean
+default: true
+```
+
+Empty value
+
+```javascript
+assert.deepEqual(IniConfigParser.parse([
+    'host ='
+].join('\n'), {
+    emptyValue: 'value'
+}), {
+    'host': 'value'
+});
+```
+
+## escapeCharKey
+
+```ini
+type: boolean
+default: true
+```
+
+Escape `\` in not quoted key
+
+```javascript
+var data = 'ho\\st = 127.0.0.1';
+
+assert.deepEqual(IniConfigParser.parse(data), {
+    'host': '127.0.0.1'
+});
+
+assert.deepEqual(IniConfigParser.parse(data, {
+    escapeCharKey: false
+}), {
+    'ho\\st': '127.0.0.1'
+});
+```
+
+## escapeCharValue
+
+```ini
+type: boolean
+default: true
+```
+
+Escape `\` in value in not quoted value
+
+```javascript
+var data = [
+    'host = 127.0\\.0.1',
+    'port = $port',
+    'eport = \\$port'
+].join('\n');
+
+assert.deepEqual(IniConfigParser.parse(data, {
+    env: {
+        port: 1234
+    }
+}), {
+    'host': '127.0.0.1',
+    'port': 1234,
+    'eport': '$port'
+});
+
+assert.deepEqual(IniConfigParser.parse(data, {
+    env: {
+        port: 1234
+    },
+    escapeCharValue: false
+}), {
+    'host': '127.0\\.0.1',
+    'port': 1234,
+    'eport': '\\1234'
+});
+```
+
+## ignoreMissingAssign
+
+```ini
+type: boolean
+default: true
+```
+
+Allow keys without assign token
+
+```javascript
+var data = [
+    'host = ',
+    'port'
+].join('\n');
+
+assert.deepEqual(IniConfigParser.parse(data), {
+    'host': '',
+    'port': ''
+});
+
+assert.throws(function() {
+    IniConfigParser.parse(data, {
+        ignoreMissingAssign: false
+    });
+});
+```
+
+## ignoreCase
+
+```ini
+type: boolean
+default: false
+```
+
+All keys and values are lower case
+
+```javascript
+assert.deepEqual(IniConfigParser.parse([
+    'host = HOST',
+    'PORT = 5678',
+    '"SHAFT" = "5678"'
+].join('\n'), {
+    ignoreCase: true
+}), {
+    'host': 'host',
+    'port': 5678,
+    'shaft': '5678'
+});
+```
+
+## merge
+
+```ini
+type: boolean
+default: false
+```
+
+Return config as merge of global + sections
+
+```javascript
+assert.deepEqual(IniConfigParser.parse([
+    'host = 127.0\\.0.1'
+].join('\n')), {
+    'host': '127.0.0.1'
+});
+
+assert.deepEqual(IniConfigParser.parse([
+    'host = 127.0\\.0.1'
+].join('\n'), {
+    merge: false
+}), {
+    'host': '127.0\\.0.1'
 });
 ```
 
