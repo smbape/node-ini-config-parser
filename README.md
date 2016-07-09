@@ -1128,22 +1128,6 @@ default: false
 
 Return config as merge of global + sections
 
-```javascript
-assert.deepEqual(IniConfigParser.parse([
-    'host = 127.0\\.0.1'
-].join('\n')), {
-    'host': '127.0.0.1'
-});
-
-assert.deepEqual(IniConfigParser.parse([
-    'host = 127.0\\.0.1'
-].join('\n'), {
-    merge: false
-}), {
-    'host': '127.0\\.0.1'
-});
-```
-
 # License
 
 The MIT License (MIT)
