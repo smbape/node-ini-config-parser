@@ -1,6 +1,6 @@
 {
   "name": "ini-config-parser",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Parse ini file with nested config overriding made easierParse ini file with nested config overriding made easier",
   "main": "index.js",
   "directories": {
