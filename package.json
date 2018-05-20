@@ -7,7 +7,7 @@
     "test": "test"
   },
   "scripts": {
-    "prepublish": "node scripts/prepublish.js --no-header -bo lib/ src/",
+    "prepublishOnly": "node scripts/prepublish.js --no-header -bo lib/ src/",
     "test": "node node_modules/mocha/bin/_mocha ./test",
     "test-cover": "node ./node_modules/istanbul/lib/cli.js cover --dir=./test/reports/coverage ./node_modules/mocha/bin/_mocha -- ./test"
   },
@@ -26,15 +26,14 @@
   "homepage": "https://github.com/smbape/node-ini-config-parser",
   "dependencies": {
     "coffee-script": "^1.12.4",
-    "deep-extend": "^0.4.1",
+    "deep-extend": "^0.5.1",
     "rimraf": "^2.6.1"
   },
   "devDependencies": {
     "async": "^2.2.0",
     "chai": "^3.5.0",
     "istanbul": "^0.4.5",
-    "mocha": "^3.2.0",
-    "mochawesome": "^2.0.4",
-    "nodeunit": "^0.11.0"
+    "mocha": "^5.2.0",
+    "mochawesome": "^2.0.4"
   }
 }

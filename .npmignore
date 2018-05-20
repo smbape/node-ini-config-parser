@@ -1,0 +1,8 @@
+/.gitattributes
+/node_modules
+/scripts
+/src
+/test
+/*.sublime-project
+/*.sublime-workspace
+/package-lock.json
